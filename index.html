@@ -286,6 +286,7 @@ body { background:#000; overflow:hidden; font-family:'Segoe UI',sans-serif; }
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 // =============================================================================
 //  BEDWARS — Full Implementation
@@ -351,6 +352,108 @@ const SHOP = {
   ],
 };
 
+// ─── TEXTURE PACK ────────────────────────────────────────────────────────────
+// Stores loaded THREE.Texture objects keyed by BT block type.
+const txCache = {};
+let txPackName = null;
+
+// Target filenames for each block type (tried in order; first match wins).
+// We scan by filename so any root-folder depth in the zip works.
+const TX_TARGETS = {
+  [BT.STONE]:     ['stone.png'],
+  [BT.WOOD]:      ['oak_planks.png','planks_oak.png'],
+  [BT.GLASS]:     ['glass.png'],
+  [BT.OBSIDIAN]:  ['obsidian.png'],
+  [BT.ENDSTONE]:  ['end_stone.png','endstone.png'],
+  [BT.SANDSTONE]: ['sandstone.png'],
+  [BT.WOOL]:      ['white_wool.png','wool_colored_white.png'],
+};
+
+// Build a flat filename → zip-path map from the zip so root folders don't matter.
+async function buildZipIndex(zip){
+  const idx = {};
+  zip.forEach((relPath, entry) => {
+    if(entry.dir) return;
+    const name = relPath.split('/').pop().toLowerCase();
+    // Prefer paths under textures/block/ over others
+    if(!idx[name] || relPath.toLowerCase().includes('textures/block/')) idx[name] = relPath;
+  });
+  return idx;
+}
+
+const _txLoader = new THREE.TextureLoader();
+function loadTexFromBlob(blob){
+  const url = URL.createObjectURL(blob);
+  const tex = _txLoader.load(url, ()=>URL.revokeObjectURL(url));
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace ?? 'srgb';
+  return tex;
+}
+
+async function loadTexturePack(file){
+  if(!window.JSZip){ showAct('JSZip failed to load — check your connection.'); return; }
+  try {
+    showAct('Loading texture pack…');
+    const zip = await JSZip.loadAsync(file);
+    const idx = await buildZipIndex(zip);
+    let found = 0;
+    for(const [bt, names] of Object.entries(TX_TARGETS)){
+      for(const name of names){
+        const path = idx[name];
+        if(!path) continue;
+        const blob = await zip.file(path).async('blob');
+        txCache[bt] = loadTexFromBlob(blob);
+        found++; break;
+      }
+    }
+    txPackName = found > 0 ? file.name.replace(/\.zip$/i,'') : null;
+    showAct(found > 0 ? `✅ Texture pack loaded (${found}/${Object.keys(TX_TARGETS).length} textures)` : '⚠ No matching textures found in pack');
+    if(started && found > 0) rebuildAllMeshes();
+  } catch(e){
+    console.error('Texture pack error:', e);
+    showAct('❌ Failed to read zip — is it a valid resource pack?');
+  }
+}
+
+function unloadTexturePack(){
+  for(const k of Object.keys(txCache)){ txCache[k].dispose(); delete txCache[k]; }
+  txPackName = null;
+  showAct('Texture pack removed');
+  if(started) rebuildAllMeshes();
+}
+
+// Creates a MeshLambertMaterial using a texture when available, falling back to solid color.
+// THREE.js multiplies material.color × texture, so passing team hex tints wool correctly.
+function makeMaterial(type, color){
+  const tex = txCache[type];
+  if(tex){
+    if(type === BT.GLASS)
+      return new THREE.MeshLambertMaterial({map:tex, transparent:true, opacity:0.45, color:0xffffff});
+    if(type === BT.WOOL)
+      return new THREE.MeshLambertMaterial({map:tex, color: color ?? 0xffffff});
+    return new THREE.MeshLambertMaterial({map:tex, color:0xffffff});
+  }
+  if(type === BT.GLASS)
+    return new THREE.MeshLambertMaterial({color: color ?? BLOCK_COLOR[type] ?? 0x888888, transparent:true, opacity:0.45});
+  return new THREE.MeshLambertMaterial({color: color ?? BLOCK_COLOR[type] ?? 0x888888});
+}
+
+// Hot-swaps all existing block meshes to pick up newly loaded (or cleared) textures.
+function rebuildAllMeshes(){
+  for(const [key, blk] of worldMap.entries()){
+    const old = blockMesh.get(key);
+    if(old){ scene.remove(old); old.geometry.dispose(); old.material.dispose(); blockMesh.delete(key); }
+    const [x,y,z] = key.split(',').map(Number);
+    const geo = new THREE.BoxGeometry(1,1,1);
+    const mat = makeMaterial(blk.type, blk.color);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x,y,z); mesh.castShadow=true; mesh.receiveShadow=true;
+    mesh.userData={bk:key};
+    scene.add(mesh); blockMesh.set(key, mesh);
+  }
+}
+
 // ─── THREE.JS GLOBALS ────────────────────────────────────────────────────────
 let scene, camera, renderer;
 let viewScene, viewCamera;   // viewmodel (hand)
@@ -406,11 +509,9 @@ function setBlock(x,y,z,type,opts={}){
   const hard=opts.hard??BLOCK_HARDNESS[type]??1;
   worldMap.set(key,{type,team:opts.team||null,hard,bed:opts.bed||false,bedTeam:opts.bedTeam||null,color});
   const old=blockMesh.get(key);
-  if(old){scene.remove(old);old.geometry.dispose();}
+  if(old){scene.remove(old);old.geometry.dispose();old.material.dispose();}
   const geo=new THREE.BoxGeometry(1,1,1);
-  const mat=type===BT.GLASS
-    ?new THREE.MeshLambertMaterial({color,transparent:true,opacity:0.45})
-    :new THREE.MeshLambertMaterial({color});
+  const mat=makeMaterial(type,color);
   const mesh=new THREE.Mesh(geo,mat);
   mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;
   mesh.userData={bk:key};
@@ -1585,6 +1686,19 @@ function renderSettings(){
     row('Block Highlight','Outline targeted block',toggle('graphics','blockHighlight'));
     row('FOV Sprint Effect','FOV widens when sprinting',toggle('graphics','fovBob'));
     row('Fancy Fog','Exponential depth fog',toggle('graphics','fancyFog'));
+
+    // ── Texture Pack ──
+    const txWrap=document.createElement('div');txWrap.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+    const txInput=document.createElement('input');txInput.type='file';txInput.accept='.zip';txInput.style.display='none';txInput.id='tx-file-input';
+    txInput.onchange=e=>{const f=e.target.files[0];if(f)loadTexturePack(f);txInput.value='';};
+    const txLoad=document.createElement('button');txLoad.className='stoggle on';txLoad.textContent='📦 Load .zip';
+    txLoad.onclick=()=>txInput.click();
+    const txClear=document.createElement('button');txClear.className='stoggle off';txClear.textContent='✕ Remove';
+    txClear.style.display=txPackName?'inline-block':'none';
+    txClear.onclick=()=>{unloadTexturePack();renderSettings();};
+    txWrap.appendChild(txInput);txWrap.appendChild(txLoad);txWrap.appendChild(txClear);
+    const txDesc=txPackName?`Active: ${txPackName}`:'Drop a Java resource pack .zip';
+    row('Texture Pack',txDesc,txWrap,true);
   }
 
   if(settingsTab==='controls'){
