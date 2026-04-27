@@ -693,7 +693,11 @@ class Player{
     if(!this.alive){
       this.respTimer-=dt;
       document.getElementById('respawn-label').textContent=`Respawning in ${Math.ceil(Math.max(0,this.respTimer))}…`;
-      if(this.respTimer<=0)this.respawn();
+      if(this.respTimer<=0){
+        // FIX #3: Re-evaluate bed state at respawn time, not at death time.
+        if(!bedData['RED']?.alive){$death.classList.remove('show');showGameOver(false,'Your bed was destroyed — you are eliminated!');}
+        else this.respawn();
+      }
       return;
     }
     this.atkCd=Math.max(0,this.atkCd-dt);
@@ -814,9 +818,11 @@ class Player{
   }
   die(reason){
     pDeath(this.pos.clone().addScaledVector(new THREE.Vector3(0,1,0),0.9), TEAMS.RED.hex);
-    this.alive=false;this.respTimer=bedData['RED']?.alive?5:0;
+    this.alive=false;
+    // FIX #3: Always set timer to 5 or 0; respawn() re-checks bed state so a
+    // mid-countdown bed break is caught in update() rather than at death time.
+    this.respTimer=bedData['RED']?.alive?5:0;
     $death.classList.add('show');document.exitPointerLock();
-    if(!bedData['RED']?.alive)setTimeout(()=>{$death.classList.remove('show');showGameOver(false,'Your bed was destroyed — you are eliminated!');},2000);
     addKillMsg(`You ${reason}!`);
   }
   addItem(give){
@@ -1046,7 +1052,8 @@ class AIPlayer{
         if(!bd||!bd.alive){this.state=AI_ST.IDLE;break;}
         const bp=bd.positions[0];const target=new THREE.Vector3(bp.x,bp.y+1,bp.z);
         this.walkTo(target,dt);
-        if(this.pos.distanceTo(target)<2){destroyBed(this.attackTarget);addKillMsg(`${this.tname} destroyed ${this.attackTarget}'s bed!`);this.state=AI_ST.IDLE;}
+        // FIX #1/#2: destroyBed() already emits the kill message; don't duplicate it.
+        if(this.pos.distanceTo(target)<2){destroyBed(this.attackTarget);this.state=AI_ST.IDLE;}
         break;
       }
       default:{
@@ -1110,13 +1117,19 @@ function destroyBed(tn){
   if(!bedData[tn]||!bedData[tn].alive)return;
   bedData[tn].alive=false;
   for(const p of bedData[tn].positions)setBlock(p.x,p.y,p.z,BT.AIR);
+  // FIX #3: Cancel in-flight respawn timers so mid-countdown bed breaks are caught immediately.
+  if(tn==='RED'&&player&&!player.alive)player.respTimer=0;
+  for(const ai of aiList){if(ai.tname===tn&&!ai.alive)ai.respTimer=0;}
   addKillMsg(`💥 ${tn}'s bed destroyed!`);updateBedUI(tn);checkElim();
 }
 function checkElim(){
   const alive=[];
   for(const tn of['RED','BLUE','GREEN','YELLOW']){
     const bedA=bedData[tn]?.alive;
-    const anyAlive=tn==='RED'?player.alive:aiList.some(a=>a.tname===tn&&a.alive);
+    // FIX #6: Count players with an active (non-sentinel) respawn timer as still in the game.
+    const anyAlive=tn==='RED'
+      ?(player.alive||player.respTimer>0)
+      :aiList.some(a=>a.tname===tn&&(a.alive||(a.respTimer>0&&a.respTimer<9999)));
     if(bedA||anyAlive)alive.push(tn);
   }
   if(alive.length===1){const w=alive[0];setTimeout(()=>w==='RED'?showGameOver(true,'🏆 You won the game!'):showGameOver(false,`${w} team won.`),1200);}
@@ -1375,7 +1388,8 @@ function breakBlock(pos){
   const blk=getBlock(pos.x,pos.y,pos.z);if(!blk)return;
   if(blk.bed){if(blk.bedTeam==='RED'){showAct("Can't break your own bed!");return;}
     pBlockBreak(new THREE.Vector3(pos.x,pos.y,pos.z), blk.color||0xff2222);
-    destroyBed(blk.bedTeam);addKillMsg(`You destroyed ${blk.bedTeam}'s bed!`);return;
+    // FIX #1/#2: destroyBed() already emits the kill message; don't duplicate it.
+    destroyBed(blk.bedTeam);return;
   }
   pBlockBreak(new THREE.Vector3(pos.x,pos.y,pos.z), blk.color||BLOCK_COLOR[blk.type]||0x888888);
   setBlock(pos.x,pos.y,pos.z,BT.AIR);
@@ -1408,7 +1422,8 @@ function renderShop(){
 }
 
 function buyItem(item){
-  if((player.res[item.cur]||0)<item.cost)return;
+  // FIX #4: Give explicit feedback on currency failure instead of silently returning.
+  if((player.res[item.cur]||0)<item.cost){showAct(`Not enough ${item.cur}!`);return;}
   player.res[item.cur]-=item.cost;
   const ok=player.addItem(item.give);
   showAct(ok?`Bought ${item.name}!`:'Inventory full!');
