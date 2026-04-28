@@ -457,8 +457,8 @@ function rebuildAllMeshes(){
 // ─── THREE.JS GLOBALS ────────────────────────────────────────────────────────
 let scene, camera, renderer;
 let viewScene, viewCamera;   // viewmodel (hand)
-let handGroup, handUpper, handLower, handItemMesh;
-let handT=0, handSwing=0, handPlace=0, handSwitchT=0;
+let handGroup, handItemMesh;
+let handT=0, handSwing=0;
 let blockOutlineMesh;
 let sunLight, fogObj, ambLight, voidParticles, cloudGroup;
 
@@ -1274,53 +1274,29 @@ function animateNPCs(dt){
 }
 
 // ─── VIEWMODEL (HAND) ────────────────────────────────────────────────────────
-// Shoulder → elbow pivot → wrist → item
-let shoulderGroup, elbowPivot, wristPivot;
-
 function initViewmodel(){
   viewScene=new THREE.Scene();
-  viewCamera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.01,10);
-  viewScene.add(new THREE.AmbientLight(0xffffff,0.75));
-  const vSun=new THREE.DirectionalLight(0xfffde0,1.0); vSun.position.set(0.8,2,0.6); viewScene.add(vSun);
-  const vFill=new THREE.DirectionalLight(0xaaccff,0.3); vFill.position.set(-1,0.5,-1); viewScene.add(vFill);
+  viewCamera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.01,10);
 
-  const m=c=>new THREE.MeshLambertMaterial({color:c});
+  viewScene.add(new THREE.AmbientLight(0xffffff,1.2));
 
-  // Root group — repositioned each frame
   handGroup=new THREE.Group();
   viewScene.add(handGroup);
 
-  // Shoulder group (slight tilt at rest)
-  shoulderGroup=new THREE.Group();
-  shoulderGroup.rotation.z=-0.10;
-  handGroup.add(shoulderGroup);
+  // Arm mesh
+  const arm=new THREE.Mesh(
+    new THREE.BoxGeometry(0.25,0.25,0.8),
+    new THREE.MeshLambertMaterial({color:0xffcc88})
+  );
+  arm.position.set(0.5,-0.4,-0.8);
+  arm.rotation.set(0.2,0.2,0);
+  arm.name='arm';
+  handGroup.add(arm);
 
-  // Upper arm (team-colored sleeve)
-  handUpper=new THREE.Mesh(new THREE.BoxGeometry(0.32,0.62,0.32),m(0xcc1111));
-  handUpper.position.y=-0.31;
-  shoulderGroup.add(handUpper);
-
-  // Elbow pivot — sits at bottom of upper arm
-  elbowPivot=new THREE.Group(); elbowPivot.name='elbowPivot'; elbowPivot.position.y=-0.62;
-  shoulderGroup.add(elbowPivot);
-
-  // Forearm (skin)
-  handLower=new THREE.Mesh(new THREE.BoxGeometry(0.28,0.52,0.28),m(0xffcc88));
-  handLower.position.y=-0.26; elbowPivot.add(handLower);
-
-  // Wrist pivot — bottom of forearm
-  wristPivot=new THREE.Group(); wristPivot.name='wristPivot'; wristPivot.position.y=-0.54;
-  elbowPivot.add(wristPivot);
-
-  // Hand mesh
-  const handMesh=new THREE.Mesh(new THREE.BoxGeometry(0.26,0.20,0.26),m(0xffcc88));
-  handMesh.position.y=-0.10; wristPivot.add(handMesh);
-
-  // Item slot attached to wrist
-  handItemMesh=new THREE.Group(); handItemMesh.position.set(0,-0.22,-0.10);
-  wristPivot.add(handItemMesh);
-
-  handGroup.position.set(0.52,-0.46,-0.62);
+  // Item slot sits in front of the arm
+  handItemMesh=new THREE.Group();
+  handItemMesh.position.set(0.5,-0.35,-1.0);
+  viewScene.add(handItemMesh);
 }
 
 function buildHandItem(){
@@ -1362,53 +1338,34 @@ function buildHandItem(){
   }
 }
 
-let lastSlot=-1, handSwitchAnim=0;
+let lastSlot=-1;
 function updateHand(dt){
-  if(!SETTINGS.graphics.handVisible||!started||over||!player?.alive){ if(handGroup) handGroup.visible=false; return; }
-  if(!handGroup) return;
+  if(!SETTINGS.graphics.handVisible||!started||over||!player?.alive){
+    if(handGroup) handGroup.visible=false;
+    if(handItemMesh) handItemMesh.visible=false;
+    return;
+  }
   handGroup.visible=true;
+  handItemMesh.visible=true;
   handT+=dt;
 
-  // Rebuild item when slot changes — trigger switch animation
-  if(player.slot!==lastSlot){ lastSlot=player.slot; buildHandItem(); handSwitchAnim=1; }
+  if(player.slot!==lastSlot){ lastSlot=player.slot; buildHandItem(); }
 
-  const sway=SETTINGS.graphics.handSway;
-  const moving=player&&(Math.abs(player.vel.x)+Math.abs(player.vel.z))>0.5;
-  const freq=moving?7.5:1.8;
-  const amp=moving?0.038*sway:0.007*sway;
+  // Walk bob
+  const moving=(Math.abs(player.vel.x)+Math.abs(player.vel.z))>0.5;
+  const bobAmp=moving?0.018*SETTINGS.graphics.handSway:0.004*SETTINGS.graphics.handSway;
+  const bobY=Math.abs(Math.sin(handT*(moving?7.5:1.8)))*bobAmp;
 
-  const bobX=Math.sin(handT*freq*0.5)*amp;
-  const bobY=Math.abs(Math.sin(handT*freq))*amp*1.8;
-
-  // Switch anim: dip down and come back up
-  handSwitchAnim=Math.max(0,handSwitchAnim-dt*8);
-  const switchDip=Math.sin(Math.max(0,handSwitchAnim)*Math.PI)*0.18;
-
-  // Swing anim (attack): shoulder slams forward, elbow follows
+  // Attack swing: nudge arm forward then back
   handSwing=Math.max(0,handSwing-dt*10);
-  const swingPhase=handSwing>0?Math.sin(handSwing*Math.PI):0;
-  const swingShoulderX=swingPhase*1.3;
-  const swingElbowX=swingPhase*0.6;
-  const swingWristX=swingPhase*0.3;
+  const swingZ=Math.sin(handSwing*Math.PI)*0.15;
 
-  // Place anim: gentle forward push
-  handPlace=Math.max(0,handPlace-dt*11);
-  const placePhase=handPlace>0?Math.sin(handPlace*Math.PI):0;
-  const placePushZ=placePhase*0.12;
-
-  // Root position (shoulder origin)
-  handGroup.position.set(0.52+bobX, -0.46-bobY-switchDip, -0.62+placePushZ);
-
-  // Shoulder tilt
-  shoulderGroup.rotation.x=0.12+swingShoulderX;
-  shoulderGroup.rotation.z=-0.10+bobX*0.35;
-
-  // Elbow bends on swing, slightly bent at rest
-  elbowPivot.rotation.x=-0.18+swingElbowX+bobY*0.25;
-
-  // Wrist snap on swing, casual tilt at rest
-  wristPivot.rotation.x=-0.08+swingWristX;
-  wristPivot.rotation.y=0.05;
+  const arm=handGroup.getObjectByName('arm');
+  if(arm){
+    arm.position.set(0.5, -0.4-bobY, -0.8-swingZ);
+    arm.rotation.x=0.2-handSwing*0.5;
+  }
+  handItemMesh.position.set(0.5,-0.35-bobY,-1.0-swingZ);
 }
 
 // ─── BLOCK OUTLINE ───────────────────────────────────────────────────────────
