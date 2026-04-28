@@ -1,149 +1,128 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voxel Bedwars Pro</title>
+    <title>Bedwars Voxel Pro</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; }
+        body { margin: 0; overflow: hidden; background: #78a7ff; }
         #crosshair {
             position: absolute; top: 50%; left: 50%;
-            width: 24px; height: 24px;
-            transform: translate(-50%, -50%);
-            pointer-events: none; opacity: 0.8;
+            width: 20px; height: 20px; transform: translate(-50%, -50%);
+            pointer-events: none; filter: invert(1);
         }
-        #hud {
-            position: absolute; bottom: 20px; left: 50%;
-            transform: translateX(-50%);
-            display: flex; gap: 4px;
-            background: rgba(0, 0, 0, 0.4);
-            padding: 4px; border: 2px solid #333;
+        #hotbar {
+            position: absolute; bottom: 15px; left: 50%;
+            transform: translateX(-50%); display: flex;
+            background: rgba(0,0,0,0.4); padding: 4px; border: 2px solid #333;
         }
-        .slot { width: 40px; height: 40px; background: #8b8b8b; border: 2px solid #373737; }
-        .active { border: 2px solid #ffffff; background: #afafaf; }
+        .slot { width: 40px; height: 40px; border: 2px solid #555; margin: 2px; }
+        .active { border-color: white; background: rgba(255,255,255,0.2); }
     </style>
 </head>
 <body>
-    <img id="crosshair" src="https://i.imgur.com/8f1fL6v.png">
-    <div id="hud">
-        <div class="slot active"></div><div class="slot"></div><div class="slot"></div>
-    </div>
+    <div id="crosshair">+</div>
+    <div id="hotbar"><div class="slot active"></div><div class="slot"></div><div class="slot"></div></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        // --- CONSTANTS ---
-        const REACH = 3.5;
-        const EYE_HEIGHT = 1.62;
-
+        // --- 1. CORE GLOBALS ---
         let scene, camera, renderer, clock, player;
         let viewScene, viewCamera, handGroup;
         let keys = {}, yaw = 0, pitch = 0, handSwing = 0;
-        let worldBlocks = [];
+        const REACH = 3.5;
 
+        // --- 2. PLAYER ENGINE ---
         class Player {
             constructor() {
-                this.pos = new THREE.Vector3(0, 5, 0);
-                this.vel = new THREE.Vector3(0, 0, 0);
+                this.pos = new THREE.Vector3(0, 2, 0);
+                this.vel = new THREE.Vector3();
                 this.onGround = false;
             }
-
             update(dt) {
                 let move = new THREE.Vector3();
                 if (keys['KeyW']) move.z -= 1;
                 if (keys['KeyS']) move.z += 1;
                 if (keys['KeyA']) move.x -= 1;
                 if (keys['KeyD']) move.x += 1;
-
                 move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
 
-                this.vel.x = move.x * 4.3;
-                this.vel.z = move.z * 4.3;
-
-                this.vel.y -= 28 * dt;
-                if (keys['Space'] && this.onGround) {
-                    this.vel.y = 8.5;
-                    this.onGround = false;
-                }
+                this.vel.x = move.x * 4.5;
+                this.vel.z = move.z * 4.5;
+                this.vel.y -= 25 * dt;
 
                 this.pos.add(this.vel.clone().multiplyScalar(dt));
-
-                if (this.pos.y < 0) {
-                    this.pos.y = 0; this.vel.y = 0; this.onGround = true;
-                }
-
+                if (this.pos.y < 0) { this.pos.y = 0; this.vel.y = 0; this.onGround = true; }
                 camera.position.copy(this.pos);
-                camera.position.y += EYE_HEIGHT;
+                camera.position.y += 1.6;
             }
         }
 
-        function createSteve(x, y, z, color) {
+        // --- 3. THE "STEVE" MODEL (NPC) ---
+        function spawnNPC(x, z, color) {
             const group = new THREE.Group();
-            const skin = new THREE.MeshLambertMaterial({ color: 0xffcc88 });
-            const clothes = new THREE.MeshLambertMaterial({ color: color });
+            const m = (c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
 
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), skin);
-            head.position.y = 1.5;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), m(0xffcc88));
+            head.position.y = 1.4;
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.2), m(color));
+            body.position.y = 0.9;
+            const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.18), m(0x3333aa));
+            lLeg.position.set(-0.1, 0.3, 0);
+            const rLeg = lLeg.clone(); rLeg.position.x = 0.1;
 
-            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.75, 0.25), clothes);
-            torso.position.y = 0.875;
-
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.75, 0.25), skin);
-            arm.position.set(0.375, 0.875, 0);
-
-            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.75, 0.25), new THREE.MeshLambertMaterial({ color: 0x3333aa }));
-            leg.position.set(0.125, 0.375, 0);
-
-            group.add(head, torso, arm, leg);
-            group.position.set(x, y, z);
+            group.add(head, body, lLeg, rLeg);
+            group.position.set(x, 0, z);
             scene.add(group);
         }
 
+        // --- 4. INITIALIZATION ---
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x78a7ff);
             clock = new THREE.Clock();
-
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
             renderer = new THREE.WebGLRenderer({ antialias: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
             const sun = new THREE.DirectionalLight(0xffffff, 1.0);
             sun.position.set(10, 20, 10);
-            scene.add(sun, new THREE.AmbientLight(0xffffff, 0.5));
+            scene.add(sun, new THREE.AmbientLight(0xffffff, 0.4));
 
             viewScene = new THREE.Scene();
-            viewCamera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 10);
+            viewCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             handGroup = new THREE.Group();
-
-            const hand = new THREE.Mesh(
-                new THREE.BoxGeometry(0.22, 0.22, 0.8),
+            const arm = new THREE.Mesh(
+                new THREE.BoxGeometry(0.2, 0.2, 0.7),
                 new THREE.MeshLambertMaterial({ color: 0xffcc88 })
             );
-            hand.position.set(0.45, -0.4, -0.7);
-            hand.rotation.set(0.25, 0.1, 0);
-            handGroup.add(hand);
+            arm.position.set(0.4, -0.3, -0.6);
+            arm.rotation.set(0.3, 0.1, 0);
+            handGroup.add(arm);
             viewScene.add(handGroup, new THREE.AmbientLight(0xffffff, 1));
 
             player = new Player();
 
-            for (let x = -8; x < 8; x++) {
-                for (let z = -8; z < 8; z++) {
+            for (let x = -10; x < 10; x++) {
+                for (let z = -10; z < 10; z++) {
                     const block = new THREE.Mesh(
                         new THREE.BoxGeometry(1, 1, 1),
-                        new THREE.MeshLambertMaterial({ color: 0x559955 })
+                        new THREE.MeshLambertMaterial({ color: 0x55aa55, flatShading: true })
                     );
                     block.position.set(x, -0.5, z);
                     scene.add(block);
-                    worldBlocks.push(block);
                 }
             }
 
-            createSteve(4, 0, -4, 0x00ff00);
+            spawnNPC(3, -3, 0xff0000);
 
-            window.addEventListener('keydown', e => keys[e.code] = true);
+            window.addEventListener('keydown', e => {
+                keys[e.code] = true;
+                if (e.code === 'Space' && player.onGround) {
+                    player.vel.y = 8.5;
+                    player.onGround = false;
+                }
+            });
             window.addEventListener('keyup', e => keys[e.code] = false);
             window.addEventListener('resize', () => {
                 camera.aspect = window.innerWidth / window.innerHeight;
@@ -155,27 +134,16 @@
             document.addEventListener('mousemove', e => {
                 if (document.pointerLockElement) {
                     yaw -= e.movementX * 0.002;
-                    pitch -= e.movementY * 0.002;
-                    pitch = Math.max(-1.5, Math.min(1.5, pitch));
+                    pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * 0.002));
                     camera.rotation.set(pitch, yaw, 0, 'YXZ');
                 }
             });
-            document.body.onclick = () => {
+            document.body.addEventListener('click', () => {
                 document.body.requestPointerLock();
-                handSwing = 1;
-                checkHit();
-            };
+                handSwing = 1.0;
+            });
 
             animate();
-        }
-
-        function checkHit() {
-            const ray = new THREE.Raycaster();
-            ray.setFromCamera(new THREE.Vector2(0, 0), camera);
-            const hits = ray.intersectObjects(worldBlocks);
-            if (hits.length > 0 && hits[0].distance <= REACH) {
-                console.log("Interact: Block at distance " + hits[0].distance);
-            }
         }
 
         function animate() {
@@ -183,11 +151,9 @@
             const dt = clock.getDelta();
             player.update(dt);
 
-            const time = performance.now() * 0.005;
-            handGroup.position.y = Math.sin(time * 2) * 0.01;
             if (handSwing > 0) {
                 handSwing -= dt * 6;
-                handGroup.rotation.x = -Math.sin(handSwing * Math.PI) * 1.1;
+                handGroup.rotation.x = -Math.sin(handSwing * Math.PI) * 1.0;
             }
 
             renderer.autoClear = true;
