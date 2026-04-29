@@ -3,167 +3,667 @@
 <head>
     <title>Bedwars Voxel Pro</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #78a7ff; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #78a7ff; font-family: 'Courier New', monospace; }
+
         #crosshair {
             position: absolute; top: 50%; left: 50%;
-            width: 20px; height: 20px; transform: translate(-50%, -50%);
-            pointer-events: none; filter: invert(1);
+            transform: translate(-50%, -50%);
+            color: white; font-size: 22px; font-weight: bold;
+            pointer-events: none; text-shadow: 1px 1px 2px #000;
+            user-select: none;
         }
+
         #hotbar {
             position: absolute; bottom: 15px; left: 50%;
             transform: translateX(-50%); display: flex;
-            background: rgba(0,0,0,0.4); padding: 4px; border: 2px solid #333;
+            background: rgba(0,0,0,0.45); padding: 4px; border: 2px solid #444;
+            gap: 3px;
         }
-        .slot { width: 40px; height: 40px; border: 2px solid #555; margin: 2px; }
-        .active { border-color: white; background: rgba(255,255,255,0.2); }
+        .slot { width: 44px; height: 44px; border: 2px solid #555; }
+        .slot.active { border-color: white; background: rgba(255,255,255,0.15); }
+
+        #hp-bar-wrap {
+            position: absolute; bottom: 70px; left: 50%;
+            transform: translateX(-50%);
+            width: 200px; height: 14px;
+            background: #333; border: 2px solid #555; border-radius: 3px;
+            overflow: hidden;
+        }
+        #hp-bar { height: 100%; background: #e03333; width: 100%; transition: width 0.1s; }
+
+        #hp-label {
+            position: absolute; bottom: 88px; left: 50%;
+            transform: translateX(-50%);
+            color: #fff; font-size: 12px; text-shadow: 1px 1px 2px #000;
+        }
+
+        #kill-feed {
+            position: absolute; top: 20px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            pointer-events: none;
+        }
+        .kill-msg {
+            background: rgba(0,0,0,0.55); padding: 3px 12px;
+            border-radius: 4px; color: #fff; font-size: 13px;
+            animation: fadeOut 3s forwards;
+        }
+        @keyframes fadeOut { 0%,60%{opacity:1} 100%{opacity:0} }
     </style>
 </head>
 <body>
     <div id="crosshair">+</div>
-    <div id="hotbar"><div class="slot active"></div><div class="slot"></div><div class="slot"></div></div>
+    <div id="hotbar">
+        <div class="slot active"></div>
+        <div class="slot"></div>
+        <div class="slot"></div>
+    </div>
+    <div id="hp-label">20 / 20</div>
+    <div id="hp-bar-wrap"><div id="hp-bar"></div></div>
+    <div id="kill-feed"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script>
-        // --- 1. CORE GLOBALS ---
-        let scene, camera, renderer, clock, player;
-        let viewScene, viewCamera, handGroup;
-        let keys = {}, yaw = 0, pitch = 0, handSwing = 0;
-        const REACH = 3.5;
+    // ═══════════════════════════════════════════════
+    //  GLOBALS
+    // ═══════════════════════════════════════════════
+    let scene, camera, renderer, clock;
+    let viewScene, viewCamera, handGroup, handArm;
+    let keys = {}, yaw = 0, pitch = 0;
+    let handSwing = 0, handT = 0;
+    const REACH = 4;
 
-        // --- 2. PLAYER ENGINE ---
-        class Player {
-            constructor() {
-                this.pos = new THREE.Vector3(0, 2, 0);
-                this.vel = new THREE.Vector3();
-                this.onGround = false;
-            }
-            update(dt) {
-                let move = new THREE.Vector3();
-                if (keys['KeyW']) move.z -= 1;
-                if (keys['KeyS']) move.z += 1;
-                if (keys['KeyA']) move.x -= 1;
-                if (keys['KeyD']) move.x += 1;
-                move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const solidBlocks = [];   // {x,y,z} for collision
+    const npcs        = [];   // NPC instances
 
-                this.vel.x = move.x * 4.5;
-                this.vel.z = move.z * 4.5;
-                this.vel.y -= 25 * dt;
+    let playerHP = 20;
+    const PLAYER_HP_MAX = 20;
 
-                this.pos.add(this.vel.clone().multiplyScalar(dt));
-                if (this.pos.y < 0) { this.pos.y = 0; this.vel.y = 0; this.onGround = true; }
-                camera.position.copy(this.pos);
-                camera.position.y += 1.6;
+    // ═══════════════════════════════════════════════
+    //  TEXTURES
+    // ═══════════════════════════════════════════════
+    const TX = {};
+    const txLoader = new THREE.TextureLoader();
+    function loadTx(name) {
+        const t = txLoader.load('textures/' + name + '.png');
+        t.magFilter = THREE.NearestFilter;
+        t.minFilter = THREE.NearestFilter;
+        TX[name] = t; return t;
+    }
+    function grassMat() {
+        const top  = new THREE.MeshLambertMaterial({ map: TX['grass_block_top'] });
+        const side = new THREE.MeshLambertMaterial({ map: TX['grass_block_side'] });
+        const bot  = new THREE.MeshLambertMaterial({ map: TX['dirt'] });
+        return [side, side, top, bot, side, side];
+    }
+    function txMat(name, color) {
+        const m = new THREE.MeshLambertMaterial({ map: TX[name] });
+        if (color !== undefined) m.color.set(color);
+        return m;
+    }
+    ['grass_block_top','grass_block_side','dirt','stone','oak_planks',
+     'glass','obsidian','end_stone','sandstone','white_wool','cobblestone']
+        .forEach(loadTx);
+
+    // ═══════════════════════════════════════════════
+    //  COLLISION
+    // ═══════════════════════════════════════════════
+    function resolvePlayer(pos, vel) {
+        const W = 0.3, H = 1.8;
+        let onGround = false;
+
+        const nearby = solidBlocks.filter(b =>
+            Math.abs(b.x - pos.x) < 2 &&
+            Math.abs(b.z - pos.z) < 2 &&
+            Math.abs(b.y - pos.y) < 3
+        );
+
+        for (const b of nearby) {
+            const ox = Math.min(pos.x + W - (b.x - 0.5), (b.x + 0.5) - (pos.x - W));
+            const oy = Math.min(pos.y + H - (b.y - 0.5), (b.y + 0.5) - pos.y);
+            const oz = Math.min(pos.z + W - (b.z - 0.5), (b.z + 0.5) - (pos.z - W));
+            if (ox <= 0 || oy <= 0 || oz <= 0) continue;
+
+            if (oy < ox && oy < oz) {
+                if (pos.y + H/2 > b.y) { pos.y += oy; vel.y = Math.max(0, vel.y); onGround = true; }
+                else                   { pos.y -= oy; vel.y = Math.min(0, vel.y); }
+            } else if (ox < oz) {
+                pos.x += pos.x > b.x ? ox : -ox; vel.x = 0;
+            } else {
+                pos.z += pos.z > b.z ? oz : -oz; vel.z = 0;
             }
         }
+        return onGround;
+    }
 
-        // --- 3. THE "STEVE" MODEL (NPC) ---
-        function spawnNPC(x, z, color) {
-            const group = new THREE.Group();
-            const m = (c) => new THREE.MeshLambertMaterial({ color: c, flatShading: true });
+    // ═══════════════════════════════════════════════
+    //  HUD
+    // ═══════════════════════════════════════════════
+    function updateHUD() {
+        document.getElementById('hp-bar').style.width = (playerHP / PLAYER_HP_MAX * 100) + '%';
+        document.getElementById('hp-bar').style.background = playerHP > 10 ? '#e03333' : '#ff8800';
+        document.getElementById('hp-label').textContent = playerHP + ' / ' + PLAYER_HP_MAX;
+    }
 
-            const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), m(0xffcc88));
-            head.position.y = 1.4;
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.2), m(color));
-            body.position.y = 0.9;
-            const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.18), m(0x3333aa));
-            lLeg.position.set(-0.1, 0.3, 0);
-            const rLeg = lLeg.clone(); rLeg.position.x = 0.1;
+    function showMsg(text, color = '#ffffff') {
+        const feed = document.getElementById('kill-feed');
+        const el = document.createElement('div');
+        el.className = 'kill-msg';
+        el.style.color = color;
+        el.textContent = text;
+        feed.appendChild(el);
+        setTimeout(() => el.remove(), 3000);
+    }
 
-            group.add(head, body, lLeg, rLeg);
-            group.position.set(x, 0, z);
-            scene.add(group);
+    // ═══════════════════════════════════════════════
+    //  PLAYER
+    // ═══════════════════════════════════════════════
+    class Player {
+        constructor() {
+            this.pos = new THREE.Vector3(0, 3, 30);
+            this.vel = new THREE.Vector3();
+            this.onGround = false;
+            this.attackCd = 0;
         }
 
-        // --- 4. INITIALIZATION ---
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x78a7ff);
-            clock = new THREE.Clock();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        update(dt) {
+            // Movement
+            const move = new THREE.Vector3();
+            if (keys['KeyW']) move.z -= 1;
+            if (keys['KeyS']) move.z += 1;
+            if (keys['KeyA']) move.x -= 1;
+            if (keys['KeyD']) move.x += 1;
+            move.normalize().applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
 
-            renderer = new THREE.WebGLRenderer({ antialias: false });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
+            this.vel.x = move.x * 4.5;
+            this.vel.z = move.z * 4.5;
+            this.vel.y = Math.max(this.vel.y - 25 * dt, -40);
 
-            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-            sun.position.set(10, 20, 10);
-            scene.add(sun, new THREE.AmbientLight(0xffffff, 0.4));
+            this.pos.addScaledVector(this.vel, dt);
 
-            viewScene = new THREE.Scene();
-            viewCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
-            handGroup = new THREE.Group();
-            const arm = new THREE.Mesh(
-                new THREE.BoxGeometry(0.2, 0.2, 0.7),
-                new THREE.MeshLambertMaterial({ color: 0xffcc88 })
-            );
-            arm.position.set(0.4, -0.3, -0.6);
-            arm.rotation.set(0.3, 0.1, 0);
-            handGroup.add(arm);
-            viewScene.add(handGroup, new THREE.AmbientLight(0xffffff, 1));
+            // Void
+            if (this.pos.y < -15) {
+                this.pos.set(0, 3, 30);
+                this.vel.set(0,0,0);
+                playerHP = Math.max(1, playerHP - 5);
+                updateHUD();
+                showMsg('Fell into the void! (-5 HP)', '#ff6600');
+            }
 
-            player = new Player();
+            this.onGround = resolvePlayer(this.pos, this.vel);
+            if (this.pos.y < 0) { this.pos.y = 0; this.vel.y = 0; this.onGround = true; }
 
-            for (let x = -10; x < 10; x++) {
-                for (let z = -10; z < 10; z++) {
-                    const block = new THREE.Mesh(
-                        new THREE.BoxGeometry(1, 1, 1),
-                        new THREE.MeshLambertMaterial({ color: 0x55aa55, flatShading: true })
-                    );
-                    block.position.set(x, -0.5, z);
-                    scene.add(block);
+            this.attackCd = Math.max(0, this.attackCd - dt);
+
+            camera.position.set(this.pos.x, this.pos.y + 1.6, this.pos.z);
+        }
+
+        tryAttack() {
+            if (this.attackCd > 0) return;
+            this.attackCd = 0.5;
+            handSwing = 1;
+
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(new THREE.Vector2(0,0), camera);
+
+            let closest = null, closestD = REACH;
+            for (const npc of npcs) {
+                if (!npc.mesh || npc.dead) continue;
+                const hits = ray.intersectObject(npc.mesh, true);
+                if (hits.length && hits[0].distance < closestD) {
+                    closest = npc; closestD = hits[0].distance;
                 }
             }
 
-            spawnNPC(3, -3, 0xff0000);
+            if (closest) {
+                closest.takeDamage(5);
+                showMsg(`Hit enemy! ${closest.hp}/${closest.maxHp} HP`, '#ffff44');
+            }
+        }
+    }
 
-            window.addEventListener('keydown', e => {
-                keys[e.code] = true;
-                if (e.code === 'Space' && player.onGround) {
-                    player.vel.y = 8.5;
-                    player.onGround = false;
-                }
-            });
-            window.addEventListener('keyup', e => keys[e.code] = false);
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                viewCamera.aspect = window.innerWidth / window.innerHeight;
-                viewCamera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-            document.addEventListener('mousemove', e => {
-                if (document.pointerLockElement) {
-                    yaw -= e.movementX * 0.002;
-                    pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * 0.002));
-                    camera.rotation.set(pitch, yaw, 0, 'YXZ');
-                }
-            });
-            document.body.addEventListener('click', () => {
-                document.body.requestPointerLock();
-                handSwing = 1.0;
-            });
+    // ═══════════════════════════════════════════════
+    //  NPC
+    // ═══════════════════════════════════════════════
+    const gltfLoader = new THREE.GLTFLoader();
 
-            animate();
+    class NPC {
+        constructor(x, y, z, color) {
+            this.pos    = new THREE.Vector3(x, y, z);
+            this.vel    = new THREE.Vector3();
+            this.hp     = 20; this.maxHp = 20;
+            this.color  = color;
+            this.dead   = false;
+            this.mesh   = null;
+            this.mixer  = null;
+            this.clips  = {};
+
+            // Manual animation state
+            this.walkT    = 0;
+            this.atkT     = 0;
+            this.isAtk    = false;
+            this.attackCd = 0;
+
+            // Limb refs for manual animation
+            this.limbs = { lLeg:null, rLeg:null, lArm:null, rArm:null, head:null };
+
+            gltfLoader.load('model/scene.gltf', gltf => {
+                this.mesh = gltf.scene.clone ? gltf.scene : gltf.scene;
+                this.mesh.scale.setScalar(0.012);
+                this.mesh.position.copy(this.pos);
+
+                // Use built-in AnimationMixer if the GLTF has clips
+                if (gltf.animations && gltf.animations.length > 0) {
+                    this.mixer = new THREE.AnimationMixer(this.mesh);
+                    gltf.animations.forEach(clip => {
+                        this.clips[clip.name.toLowerCase()] = this.mixer.clipAction(clip);
+                    });
+                    const idle = this.clips['idle'] || this.clips['stand'] || Object.values(this.clips)[0];
+                    if (idle) { idle.play(); }
+                } else {
+                    // No built-in animations — find limbs manually
+                    this._findLimbs();
+                }
+
+                scene.add(this.mesh);
+            }, undefined, () => this._fallback(color));
+
+            // HP bar above head
+            const bgGeo = new THREE.PlaneGeometry(1, 0.1);
+            const bgMat = new THREE.MeshBasicMaterial({ color: 0x222222, depthTest: false });
+            this.hpBg = new THREE.Mesh(bgGeo, bgMat);
+
+            const fgGeo = new THREE.PlaneGeometry(1, 0.1);
+            const fgMat = new THREE.MeshBasicMaterial({ color: 0x22ee44, depthTest: false });
+            this.hpFg = new THREE.Mesh(fgGeo, fgMat);
+            this.hpFg.position.z = 0.01;
+
+            this.hpRoot = new THREE.Group();
+            this.hpRoot.add(this.hpBg, this.hpFg);
+            this.hpRoot.position.set(x, y + 2.2, z);
+            scene.add(this.hpRoot);
         }
 
-        function animate() {
-            requestAnimationFrame(animate);
-            const dt = clock.getDelta();
-            player.update(dt);
+        _findLimbs() {
+            // Collect all Object3D children with children (groups = bone-like)
+            const groups = [];
+            this.mesh.traverse(c => { if (c.isGroup || c.isBone) groups.push(c); });
 
-            if (handSwing > 0) {
-                handSwing -= dt * 6;
-                handGroup.rotation.x = -Math.sin(handSwing * Math.PI) * 1.0;
+            // Sort by their Y in model space
+            groups.sort((a,b) => a.position.y - b.position.y);
+
+            // Heuristic: bottom = legs, top = head/arms
+            const n = groups.length;
+            if (n >= 4) {
+                this.limbs.lLeg = groups[0];
+                this.limbs.rLeg = groups[1];
+                this.limbs.lArm = groups[n - 2];
+                this.limbs.rArm = groups[n - 1];
+                this.limbs.head = groups[n - 1];
+            } else if (n >= 2) {
+                this.limbs.lLeg = groups[0];
+                this.limbs.rLeg = groups[1];
+            }
+        }
+
+        _fallback(color) {
+            const g = new THREE.Group();
+            const m = c => new THREE.MeshLambertMaterial({color:c});
+            const head  = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4), m(0xffcc88)); head.position.y = 1.7; head.name = 'head';
+            const body  = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.6,0.2), m(color));    body.position.y = 1.1;
+            const lArm  = new THREE.Group(); lArm.position.set(-0.3,1.1,0); lArm.name='lArm';
+            lArm.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.18,0.55,0.18),m(color)), {position:{x:0,y:-0.27,z:0}}));
+            const rArm  = lArm.clone(); rArm.position.x = 0.3; rArm.name='rArm';
+            const lLeg  = new THREE.Group(); lLeg.position.set(-0.12,0.6,0); lLeg.name='lLeg';
+            lLeg.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.18,0.6,0.18),m(0x223388)),{position:{x:0,y:-0.3,z:0}}));
+            const rLeg  = lLeg.clone(); rLeg.position.x = 0.12; rLeg.name='rLeg';
+            g.add(head, body, lArm, rArm, lLeg, rLeg);
+            g.position.copy(this.pos);
+            this.mesh = g;
+            this.limbs = { head, lArm, rArm, lLeg, rLeg };
+            scene.add(g);
+        }
+
+        update(dt) {
+            if (this.dead || !this.mesh) return;
+
+            const toPlayer = new THREE.Vector3().subVectors(player.pos, this.pos);
+            const dist     = toPlayer.length();
+            const dir2d    = toPlayer.clone().setY(0).normalize();
+
+            // ── AI ──
+            this.attackCd = Math.max(0, this.attackCd - dt);
+
+            if (dist < 18) {
+                // Chase
+                this.vel.x = dir2d.x * 2.8;
+                this.vel.z = dir2d.z * 2.8;
+                this.mesh.rotation.y = Math.atan2(dir2d.x, dir2d.z);
+
+                // Attack when close
+                if (dist < 2.2 && this.attackCd <= 0) {
+                    this.doAttack();
+                }
+            } else {
+                this.vel.x = 0;
+                this.vel.z = 0;
             }
 
-            renderer.autoClear = true;
-            renderer.render(scene, camera);
-            renderer.autoClear = false;
-            renderer.clearDepth();
-            renderer.render(viewScene, viewCamera);
+            // Gravity + move
+            this.vel.y = Math.max(this.vel.y - 25 * dt, -40);
+            this.pos.addScaledVector(this.vel, dt);
+
+            // Simple floor at y=0.5 (platform surface)
+            if (this.pos.y < 0.5) { this.pos.y = 0.5; this.vel.y = 0; }
+
+            this.mesh.position.copy(this.pos);
+            this.hpRoot.position.set(this.pos.x, this.pos.y + 2.2, this.pos.z);
+            this.hpRoot.lookAt(camera.position);
+
+            // ── ANIMATIONS ──
+            if (this.mixer) {
+                // Switch clips if built-in anim exists
+                const moving = dist < 18 && (Math.abs(this.vel.x) + Math.abs(this.vel.z)) > 0.1;
+                const clipName = this.isAtk ? 'attack' : (moving ? 'walk' : 'idle');
+                const next = this.clips[clipName] || this.clips['walk'] || this.clips[Object.keys(this.clips)[0]];
+                if (next && !next.isRunning()) {
+                    Object.values(this.clips).forEach(c => c.stop());
+                    next.play();
+                }
+                this.mixer.update(dt);
+            } else {
+                this._animateManual(dt);
+            }
+
+            // Attack timing
+            if (this.isAtk) {
+                this.atkT += dt * 10;
+                if (this.atkT > Math.PI) { this.isAtk = false; this.atkT = 0; }
+            }
         }
 
-        init();
+        _animateManual(dt) {
+            const moving = (Math.abs(this.vel.x) + Math.abs(this.vel.z)) > 0.1;
+            const { lLeg, rLeg, lArm, rArm } = this.limbs;
+
+            if (moving) {
+                this.walkT += dt * 9;
+                const s = Math.sin(this.walkT);
+                if (lLeg) lLeg.rotation.x = s * 0.65;
+                if (rLeg) rLeg.rotation.x = -s * 0.65;
+                if (lArm) lArm.rotation.x = -s * 0.45;
+                if (rArm) rArm.rotation.x =  s * 0.45;
+            } else {
+                // Return to rest
+                [lLeg, rLeg, lArm, rArm].forEach(l => { if (l) l.rotation.x *= 0.85; });
+            }
+
+            // Attack swing — right arm slams forward
+            if (this.isAtk && rArm) {
+                rArm.rotation.x = -Math.sin(this.atkT) * 1.6;
+            }
+        }
+
+        doAttack() {
+            this.attackCd = 1.2;
+            this.isAtk    = true;
+            this.atkT     = 0;
+
+            playerHP = Math.max(0, playerHP - 4);
+            updateHUD();
+
+            if (playerHP <= 0) {
+                playerHP = PLAYER_HP_MAX;
+                player.pos.set(0, 3, 30);
+                player.vel.set(0,0,0);
+                updateHUD();
+                showMsg('You were eliminated! Respawning…', '#ff4444');
+            } else {
+                showMsg('Ouch! -4 HP', '#ff6666');
+            }
+        }
+
+        takeDamage(amt) {
+            this.hp -= amt;
+            const ratio = Math.max(0, this.hp / this.maxHp);
+            this.hpFg.scale.x = ratio;
+            this.hpFg.position.x = -(1 - ratio) * 0.5;
+            this.hpFg.material.color.setHex(ratio > 0.5 ? 0x22ee44 : ratio > 0.25 ? 0xffaa00 : 0xff2222);
+
+            if (this.hp <= 0) this.die();
+        }
+
+        die() {
+            this.dead = true;
+            if (this.mesh)    scene.remove(this.mesh);
+            if (this.hpRoot)  scene.remove(this.hpRoot);
+            const i = npcs.indexOf(this);
+            if (i > -1) npcs.splice(i, 1);
+            showMsg('Enemy eliminated!', '#44ff88');
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    //  MAP
+    // ═══════════════════════════════════════════════
+    const TEAMS = [
+        { name:'Red',    color:0xcc2222, x:  0, z: 30 },
+        { name:'Blue',   color:0x2244cc, x:  0, z:-30 },
+        { name:'Green',  color:0x22aa33, x: 30, z:  0 },
+        { name:'Yellow', color:0xccaa00, x:-30, z:  0 },
+    ];
+
+    function placeBlock(x, y, z, mat) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat);
+        mesh.position.set(x, y, z);
+        scene.add(mesh);
+        solidBlocks.push({x, y, z});
+    }
+
+    function buildIsland(cx, cz, color) {
+        const woolMat  = txMat('white_wool', color);
+        const stoneMat = txMat('stone');
+
+        for (let dx = -3; dx <= 3; dx++) {
+            for (let dz = -3; dz <= 3; dz++) {
+                placeBlock(cx+dx,  0, cz+dz, woolMat);
+                placeBlock(cx+dx, -1, cz+dz, stoneMat);
+            }
+        }
+
+        // Bed
+        const bedMat = new THREE.MeshLambertMaterial({ color });
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(1,0.4,1), bedMat);
+        b1.position.set(cx-1, 0.7, cz); scene.add(b1);
+        const b2 = b1.clone(); b2.position.x = cx+1; scene.add(b2);
+
+        // NPC enemy on each enemy island
+        if (color !== TEAMS[0].color) {
+            const npc = new NPC(cx, 1, cz, color);
+            npcs.push(npc);
+        }
+    }
+
+    function buildBridge(x1, z1, x2, z2) {
+        const mat   = txMat('cobblestone');
+        const steps = Math.ceil(Math.hypot(x2-x1, z2-z1));
+        for (let i = 0; i <= steps; i++) {
+            const t  = i / steps;
+            const bx = Math.round(x1 + (x2-x1)*t);
+            const bz = Math.round(z1 + (z2-z1)*t);
+            placeBlock(bx,   0, bz,   mat);
+            placeBlock(bx+1, 0, bz,   mat);
+            placeBlock(bx-1, 0, bz,   mat);
+        }
+    }
+
+    function buildMap() {
+        TEAMS.forEach(t => buildIsland(t.x, t.z, t.color));
+
+        TEAMS.forEach(t => {
+            const dx = -t.x, dz = -t.z;
+            const len = Math.hypot(dx, dz);
+            const sx = Math.round(t.x + dx/len * 4);
+            const sz = Math.round(t.z + dz/len * 4);
+            const ex = Math.round(0  - dx/len * 4);
+            const ez = Math.round(0  - dz/len * 4);
+            buildBridge(sx, sz, ex, ez);
+        });
+
+        // Centre island
+        const cMat = txMat('end_stone');
+        for (let dx = -3; dx <= 3; dx++)
+            for (let dz = -3; dz <= 3; dz++)
+                placeBlock(dx, 0, dz, cMat);
+    }
+
+    // ═══════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════
+    let player;
+
+    function init() {
+        scene    = new THREE.Scene();
+        scene.background = new THREE.Color(0x78a7ff);
+        scene.fog = new THREE.Fog(0x78a7ff, 40, 120);
+        clock    = new THREE.Clock();
+
+        camera   = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 200);
+        renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(10,20,10);
+        const fill= new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-10,5,-10);
+        scene.add(sun, fill, new THREE.AmbientLight(0xffffff, 0.7));
+
+        // ── Viewmodel ──
+        viewScene  = new THREE.Scene();
+        viewCamera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 10);
+        viewScene.add(new THREE.AmbientLight(0xffffff, 1.4));
+        const vSun = new THREE.DirectionalLight(0xffffff, 0.8); vSun.position.set(1,2,1);
+        viewScene.add(vSun);
+
+        handGroup = new THREE.Group();
+        viewScene.add(handGroup);
+
+        // Upper arm sleeve
+        const sleeve = new THREE.Mesh(
+            new THREE.BoxGeometry(0.22, 0.55, 0.22),
+            new THREE.MeshLambertMaterial({ color: 0xcc2222 })
+        );
+        sleeve.position.y = -0.27;
+
+        // Forearm (skin)
+        handArm = new THREE.Mesh(
+            new THREE.BoxGeometry(0.20, 0.48, 0.20),
+            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
+        );
+        handArm.position.y = -0.24;
+
+        // Elbow pivot
+        const elbowPivot = new THREE.Group();
+        elbowPivot.position.y = -0.55;
+        elbowPivot.add(handArm);
+
+        // Hand
+        const handMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.18, 0.16, 0.18),
+            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
+        );
+        handMesh.position.y = -0.52;
+        elbowPivot.add(handMesh);
+
+        const shoulderPivot = new THREE.Group();
+        shoulderPivot.add(sleeve, elbowPivot);
+        shoulderPivot.position.set(0.42, -0.38, -0.55);
+        shoulderPivot.rotation.set(0.15, 0.1, 0);
+        handGroup.add(shoulderPivot);
+        handGroup._shoulder = shoulderPivot;
+        handGroup._elbow    = elbowPivot;
+
+        // Map + player
+        buildMap();
+        player = new Player();
+        updateHUD();
+
+        // ── Input ──
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (e.code === 'Space' && player.onGround) {
+                player.vel.y = 8.5;
+                player.onGround = false;
+            }
+        });
+        window.addEventListener('keyup',   e => keys[e.code] = false);
+        window.addEventListener('resize',  () => {
+            camera.aspect = viewCamera.aspect = innerWidth/innerHeight;
+            camera.updateProjectionMatrix();
+            viewCamera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+        });
+        document.addEventListener('mousemove', e => {
+            if (!document.pointerLockElement) return;
+            yaw   -= e.movementX * 0.002;
+            pitch  = Math.max(-1.48, Math.min(1.48, pitch - e.movementY * 0.002));
+            camera.rotation.set(pitch, yaw, 0, 'YXZ');
+        });
+        document.addEventListener('click', () => {
+            if (!document.pointerLockElement) { document.body.requestPointerLock(); return; }
+            player.tryAttack();
+        });
+
+        animate();
+    }
+
+    // ═══════════════════════════════════════════════
+    //  LOOP
+    // ═══════════════════════════════════════════════
+    function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+
+        player.update(dt);
+        npcs.forEach(n => n.update(dt));
+
+        // ── Hand animation ──
+        handT += dt;
+        const moving = (Math.abs(player.vel.x) + Math.abs(player.vel.z)) > 0.3;
+
+        // Walk bob
+        const bobFreq = moving ? 8 : 1.5;
+        const bobAmp  = moving ? 0.022 : 0.005;
+        const bobY    = Math.sin(handT * bobFreq) * bobAmp;
+        const bobX    = Math.sin(handT * bobFreq * 0.5) * bobAmp * 0.5;
+
+        // Attack swing: shoulder slams forward, elbow follows
+        if (handSwing > 0) handSwing = Math.max(0, handSwing - dt * 8);
+        const swingPhase = handSwing > 0 ? Math.sin(handSwing * Math.PI) : 0;
+
+        const shoulder = handGroup._shoulder;
+        const elbow    = handGroup._elbow;
+        if (shoulder) {
+            shoulder.position.set(0.42 + bobX, -0.38 - bobY, -0.55);
+            shoulder.rotation.x = 0.15 - swingPhase * 1.2;
+            shoulder.rotation.z = bobX * 0.4;
+        }
+        if (elbow) {
+            elbow.rotation.x = -0.1 + swingPhase * 0.7;
+        }
+
+        // ── Render ──
+        renderer.autoClear = true;
+        renderer.render(scene, camera);
+        renderer.autoClear = false;
+        renderer.clearDepth();
+        renderer.render(viewScene, viewCamera);
+    }
+
+    init();
     </script>
 </body>
 </html>
