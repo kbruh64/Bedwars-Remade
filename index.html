@@ -8,20 +8,28 @@
 
         #crosshair {
             position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
+            transform: translate(-50%,-50%);
             color: white; font-size: 22px; font-weight: bold;
             pointer-events: none; text-shadow: 1px 1px 2px #000;
-            user-select: none;
+            user-select: none; transition: transform 0.08s;
         }
+        #crosshair.hit { transform: translate(-50%,-50%) scale(1.6); color: #ff4444; }
 
         #hotbar {
             position: absolute; bottom: 15px; left: 50%;
             transform: translateX(-50%); display: flex;
-            background: rgba(0,0,0,0.45); padding: 4px; border: 2px solid #444;
-            gap: 3px;
+            background: rgba(0,0,0,0.45); padding: 4px;
+            border: 2px solid #555; gap: 3px;
+            animation: slideUp 0.5s ease-out;
         }
-        .slot { width: 44px; height: 44px; border: 2px solid #555; }
+        @keyframes slideUp { from{transform:translateX(-50%) translateY(60px);opacity:0} to{transform:translateX(-50%) translateY(0);opacity:1} }
+        .slot {
+            width: 44px; height: 44px; border: 2px solid #555;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: #ccc; transition: background 0.1s, border-color 0.1s;
+        }
         .slot.active { border-color: white; background: rgba(255,255,255,0.15); }
+        .slot-icon { width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated; }
 
         #hp-bar-wrap {
             position: absolute; bottom: 70px; left: 50%;
@@ -30,7 +38,7 @@
             background: #333; border: 2px solid #555; border-radius: 3px;
             overflow: hidden;
         }
-        #hp-bar { height: 100%; background: #e03333; width: 100%; transition: width 0.1s; }
+        #hp-bar { height: 100%; background: #e03333; width: 100%; transition: width 0.12s, background 0.12s; }
 
         #hp-label {
             position: absolute; bottom: 88px; left: 50%;
@@ -39,51 +47,180 @@
         }
 
         #kill-feed {
-            position: absolute; top: 20px; left: 50%;
-            transform: translateX(-50%);
-            display: flex; flex-direction: column; align-items: center; gap: 4px;
+            position: absolute; top: 20px; right: 20px;
+            display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
             pointer-events: none;
         }
         .kill-msg {
-            background: rgba(0,0,0,0.55); padding: 3px 12px;
+            background: rgba(0,0,0,0.6); padding: 4px 14px;
             border-radius: 4px; color: #fff; font-size: 13px;
-            animation: fadeOut 3s forwards;
+            animation: fadeSlide 3.5s forwards;
+            border-left: 3px solid #44ff88;
         }
-        @keyframes fadeOut { 0%,60%{opacity:1} 100%{opacity:0} }
+        @keyframes fadeSlide {
+            0%   { opacity:0; transform:translateX(30px); }
+            10%  { opacity:1; transform:translateX(0); }
+            70%  { opacity:1; }
+            100% { opacity:0; transform:translateX(10px); }
+        }
+
+        /* ── DAMAGE FLASH ── */
+        #damage-flash {
+            position: absolute; inset: 0;
+            background: rgba(220,30,30,0.45);
+            pointer-events: none; opacity: 0;
+            transition: opacity 0.05s;
+        }
+
+        /* ── SETTINGS OVERLAY ── */
+        #settings {
+            display: none; position: absolute; inset: 0;
+            background: rgba(0,0,0,0.75);
+            align-items: center; justify-content: center;
+            flex-direction: column; z-index: 100;
+        }
+        #settings.open { display: flex; }
+        #settings-panel {
+            background: #1a1a1a; border: 2px solid #444;
+            border-radius: 8px; padding: 28px 36px; min-width: 360px;
+            color: #fff; display: flex; flex-direction: column; gap: 18px;
+            animation: popIn 0.18s ease-out;
+        }
+        @keyframes popIn { from{transform:scale(0.88);opacity:0} to{transform:scale(1);opacity:1} }
+        #settings-panel h2 { text-align: center; font-size: 22px; margin-bottom: 4px; letter-spacing: 2px; }
+        .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        .setting-row label { font-size: 14px; color: #ccc; }
+        .setting-row input[type=range] { width: 160px; accent-color: #4af; }
+        .setting-val { font-size: 13px; color: #4af; min-width: 36px; text-align: right; }
+        #settings-close {
+            background: #333; border: 2px solid #555; color: #fff;
+            padding: 8px 28px; font-family: 'Courier New', monospace;
+            font-size: 15px; cursor: pointer; border-radius: 5px;
+            margin-top: 6px; transition: background 0.15s;
+        }
+        #settings-close:hover { background: #4af; color: #000; }
+
+        /* ── ESC HINT ── */
+        #esc-hint {
+            position: absolute; top: 10px; left: 10px;
+            color: rgba(255,255,255,0.5); font-size: 11px;
+            pointer-events: none;
+        }
+
+        /* ── ITEM NAME POPUP ── */
+        #item-name {
+            position: absolute; bottom: 120px; left: 50%;
+            transform: translateX(-50%);
+            color: #fff; font-size: 14px; text-shadow: 1px 1px 2px #000;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <div id="crosshair">+</div>
+    <div id="damage-flash"></div>
+
     <div id="hotbar">
-        <div class="slot active"></div>
-        <div class="slot"></div>
-        <div class="slot"></div>
+        <div class="slot active" title="Sword">⚔</div>
+        <div class="slot" title="Blocks">🧱</div>
+        <div class="slot" title="Bow">🏹</div>
     </div>
+
     <div id="hp-label">20 / 20</div>
     <div id="hp-bar-wrap"><div id="hp-bar"></div></div>
+    <div id="item-name">Iron Sword</div>
     <div id="kill-feed"></div>
+    <div id="esc-hint">ESC — Settings</div>
+
+    <!-- Settings panel -->
+    <div id="settings">
+        <div id="settings-panel">
+            <h2>⚙ SETTINGS</h2>
+
+            <div class="setting-row">
+                <label>Mouse Sensitivity</label>
+                <input type="range" id="s-sens" min="0.5" max="5" step="0.1" value="2">
+                <span class="setting-val" id="v-sens">2.0</span>
+            </div>
+            <div class="setting-row">
+                <label>FOV</label>
+                <input type="range" id="s-fov" min="60" max="110" step="1" value="75">
+                <span class="setting-val" id="v-fov">75</span>
+            </div>
+            <div class="setting-row">
+                <label>Render Distance</label>
+                <input type="range" id="s-fog" min="40" max="200" step="10" value="120">
+                <span class="setting-val" id="v-fog">120</span>
+            </div>
+            <div class="setting-row">
+                <label>Master Volume</label>
+                <input type="range" id="s-vol" min="0" max="100" step="1" value="70">
+                <span class="setting-val" id="v-vol">70</span>
+            </div>
+
+            <button id="settings-close">Resume</button>
+        </div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script>
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
+    //  SETTINGS
+    // ══════════════════════════════════════════════════
+    const Settings = { sens: 0.002, fov: 75, fog: 120, vol: 0.7 };
+
+    function bindSlider(id, valId, key, scale, apply) {
+        const sl = document.getElementById(id);
+        const vl = document.getElementById(valId);
+        sl.addEventListener('input', () => {
+            const v = parseFloat(sl.value);
+            Settings[key] = v * scale;
+            vl.textContent = sl.value;
+            if (apply) apply(v);
+        });
+    }
+    bindSlider('s-sens', 'v-sens', 'sens', 0.001, null);
+    bindSlider('s-fov',  'v-fov',  'fov',  1,     v => { if(camera){ camera.fov=v; camera.updateProjectionMatrix(); }});
+    bindSlider('s-fog',  'v-fog',  'fog',  1,     v => { if(scene){ scene.fog.far=v; }});
+    bindSlider('s-vol',  'v-vol',  'vol',  0.01,  null);
+
+    document.getElementById('settings-close').addEventListener('click', closeSettings);
+
+    let settingsOpen = false;
+    function openSettings() {
+        settingsOpen = true;
+        document.getElementById('settings').classList.add('open');
+        if (document.pointerLockElement) document.exitPointerLock();
+    }
+    function closeSettings() {
+        settingsOpen = false;
+        document.getElementById('settings').classList.remove('open');
+        document.body.requestPointerLock();
+    }
+
+    // ══════════════════════════════════════════════════
     //  GLOBALS
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     let scene, camera, renderer, clock;
-    let viewScene, viewCamera, handGroup, handArm;
+    let viewScene, viewCamera, handGroup;
     let keys = {}, yaw = 0, pitch = 0;
     let handSwing = 0, handT = 0;
-    const REACH = 4;
+    let camShake = 0, camShakeT = 0;
+    const REACH = 4.5;
 
-    const solidBlocks = [];   // {x,y,z} for collision
-    const npcs        = [];   // NPC instances
+    const solidBlocks = [];
+    const npcs        = [];
+    const particles   = [];
 
     let playerHP = 20;
     const PLAYER_HP_MAX = 20;
+    let selectedSlot = 0;
+    const ITEMS = ['Iron Sword', 'Wool Block', 'Bow'];
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     //  TEXTURES
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     const TX = {};
     const txLoader = new THREE.TextureLoader();
     function loadTx(name) {
@@ -107,28 +244,65 @@
      'glass','obsidian','end_stone','sandstone','white_wool','cobblestone']
         .forEach(loadTx);
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
+    //  PARTICLES
+    // ══════════════════════════════════════════════════
+    function spawnParticles(pos, color, count = 8) {
+        for (let i = 0; i < count; i++) {
+            const geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const mat = new THREE.MeshLambertMaterial({ color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(pos).add(new THREE.Vector3(
+                (Math.random()-0.5)*0.5,
+                Math.random()*0.5,
+                (Math.random()-0.5)*0.5
+            ));
+            const vel = new THREE.Vector3(
+                (Math.random()-0.5)*4,
+                Math.random()*4+1,
+                (Math.random()-0.5)*4
+            );
+            scene.add(mesh);
+            particles.push({ mesh, vel, life: 0.7 + Math.random()*0.4 });
+        }
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            p.vel.y -= 12 * dt;
+            p.mesh.position.addScaledVector(p.vel, dt);
+            p.mesh.rotation.x += dt * 5;
+            p.mesh.rotation.z += dt * 3;
+            p.mesh.material.opacity = Math.max(0, p.life / 0.8);
+            p.mesh.material.transparent = true;
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════
     //  COLLISION
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     function resolvePlayer(pos, vel) {
         const W = 0.3, H = 1.8;
         let onGround = false;
-
         const nearby = solidBlocks.filter(b =>
-            Math.abs(b.x - pos.x) < 2 &&
-            Math.abs(b.z - pos.z) < 2 &&
-            Math.abs(b.y - pos.y) < 3
+            Math.abs(b.x - pos.x) < 3 &&
+            Math.abs(b.z - pos.z) < 3 &&
+            Math.abs(b.y - pos.y) < 4
         );
-
         for (const b of nearby) {
-            const ox = Math.min(pos.x + W - (b.x - 0.5), (b.x + 0.5) - (pos.x - W));
-            const oy = Math.min(pos.y + H - (b.y - 0.5), (b.y + 0.5) - pos.y);
-            const oz = Math.min(pos.z + W - (b.z - 0.5), (b.z + 0.5) - (pos.z - W));
-            if (ox <= 0 || oy <= 0 || oz <= 0) continue;
-
+            const ox = Math.min(pos.x + W - (b.x-0.5), (b.x+0.5) - (pos.x-W));
+            const oy = Math.min(pos.y + H - (b.y-0.5), (b.y+0.5) - pos.y);
+            const oz = Math.min(pos.z + W - (b.z-0.5), (b.z+0.5) - (pos.z-W));
+            if (ox<=0||oy<=0||oz<=0) continue;
             if (oy < ox && oy < oz) {
-                if (pos.y + H/2 > b.y) { pos.y += oy; vel.y = Math.max(0, vel.y); onGround = true; }
-                else                   { pos.y -= oy; vel.y = Math.min(0, vel.y); }
+                if (pos.y + H/2 > b.y) { pos.y += oy; vel.y = Math.max(0,vel.y); onGround = true; }
+                else                   { pos.y -= oy; vel.y = Math.min(0,vel.y); }
             } else if (ox < oz) {
                 pos.x += pos.x > b.x ? ox : -ox; vel.x = 0;
             } else {
@@ -138,38 +312,62 @@
         return onGround;
     }
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     //  HUD
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     function updateHUD() {
-        document.getElementById('hp-bar').style.width = (playerHP / PLAYER_HP_MAX * 100) + '%';
-        document.getElementById('hp-bar').style.background = playerHP > 10 ? '#e03333' : '#ff8800';
+        const pct = playerHP / PLAYER_HP_MAX * 100;
+        document.getElementById('hp-bar').style.width = pct + '%';
+        document.getElementById('hp-bar').style.background =
+            playerHP > 10 ? '#e03333' : playerHP > 5 ? '#ff8800' : '#ff2222';
         document.getElementById('hp-label').textContent = playerHP + ' / ' + PLAYER_HP_MAX;
     }
 
-    function showMsg(text, color = '#ffffff') {
+    function flashDamage() {
+        const el = document.getElementById('damage-flash');
+        el.style.opacity = '1';
+        setTimeout(() => el.style.opacity = '0', 120);
+        camShake = 0.18;
+    }
+
+    function flashCrosshair() {
+        const ch = document.getElementById('crosshair');
+        ch.classList.add('hit');
+        setTimeout(() => ch.classList.remove('hit'), 120);
+    }
+
+    function showMsg(text, color = '#ffffff', borderColor = '#44ff88') {
         const feed = document.getElementById('kill-feed');
         const el = document.createElement('div');
         el.className = 'kill-msg';
         el.style.color = color;
+        el.style.borderLeftColor = borderColor;
         el.textContent = text;
         feed.appendChild(el);
-        setTimeout(() => el.remove(), 3000);
+        setTimeout(() => el.remove(), 3500);
     }
 
-    // ═══════════════════════════════════════════════
+    function showItemName(name) {
+        const el = document.getElementById('item-name');
+        el.textContent = name;
+        el.style.opacity = '1';
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.style.opacity = '0', 1500);
+    }
+
+    // ══════════════════════════════════════════════════
     //  PLAYER
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     class Player {
         constructor() {
             this.pos = new THREE.Vector3(0, 3, 30);
             this.vel = new THREE.Vector3();
             this.onGround = false;
             this.attackCd = 0;
+            this.stepT = 0;
         }
 
         update(dt) {
-            // Movement
             const move = new THREE.Vector3();
             if (keys['KeyW']) move.z -= 1;
             if (keys['KeyS']) move.z += 1;
@@ -177,19 +375,20 @@
             if (keys['KeyD']) move.x += 1;
             move.normalize().applyAxisAngle(new THREE.Vector3(0,1,0), yaw);
 
-            this.vel.x = move.x * 4.5;
-            this.vel.z = move.z * 4.5;
+            const speed = keys['ShiftLeft'] ? 7 : 4.5;
+            this.vel.x = move.x * speed;
+            this.vel.z = move.z * speed;
             this.vel.y = Math.max(this.vel.y - 25 * dt, -40);
 
             this.pos.addScaledVector(this.vel, dt);
 
-            // Void
             if (this.pos.y < -15) {
                 this.pos.set(0, 3, 30);
                 this.vel.set(0,0,0);
                 playerHP = Math.max(1, playerHP - 5);
                 updateHUD();
-                showMsg('Fell into the void! (-5 HP)', '#ff6600');
+                flashDamage();
+                showMsg('☠ Fell into the void! (−5 HP)', '#ff6600', '#ff6600');
             }
 
             this.onGround = resolvePlayer(this.pos, this.vel);
@@ -197,7 +396,20 @@
 
             this.attackCd = Math.max(0, this.attackCd - dt);
 
-            camera.position.set(this.pos.x, this.pos.y + 1.6, this.pos.z);
+            // Cam shake
+            let shakeX = 0, shakeY = 0;
+            if (camShake > 0) {
+                camShakeT += dt * 40;
+                shakeX = Math.sin(camShakeT * 1.7) * camShake * 0.04;
+                shakeY = Math.cos(camShakeT * 2.3) * camShake * 0.03;
+                camShake = Math.max(0, camShake - dt * 4);
+            }
+
+            camera.position.set(
+                this.pos.x + shakeX,
+                this.pos.y + 1.6 + shakeY,
+                this.pos.z
+            );
         }
 
         tryAttack() {
@@ -219,89 +431,83 @@
 
             if (closest) {
                 closest.takeDamage(5);
-                showMsg(`Hit enemy! ${closest.hp}/${closest.maxHp} HP`, '#ffff44');
+                flashCrosshair();
+                spawnParticles(closest.pos.clone().add(new THREE.Vector3(0,1,0)), 0xff4444, 6);
+                showMsg(`⚔ Hit! ${closest.hp}/${closest.maxHp} HP`, '#ffff44', '#ffff44');
             }
         }
     }
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     //  NPC
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     const gltfLoader = new THREE.GLTFLoader();
 
     class NPC {
-        constructor(x, y, z, color) {
-            this.pos    = new THREE.Vector3(x, y, z);
-            this.vel    = new THREE.Vector3();
-            this.hp     = 20; this.maxHp = 20;
-            this.color  = color;
-            this.dead   = false;
-            this.mesh   = null;
-            this.mixer  = null;
-            this.clips  = {};
-
-            // Manual animation state
+        constructor(x, y, z, color, team) {
+            this.pos      = new THREE.Vector3(x, y, z);
+            this.vel      = new THREE.Vector3();
+            this.hp       = 20; this.maxHp = 20;
+            this.color    = color;
+            this.team     = team;
+            this.dead     = false;
+            this.mesh     = null;
+            this.mixer    = null;
+            this.clips    = {};
             this.walkT    = 0;
             this.atkT     = 0;
             this.isAtk    = false;
             this.attackCd = 0;
-
-            // Limb refs for manual animation
-            this.limbs = { lLeg:null, rLeg:null, lArm:null, rArm:null, head:null };
+            this.floatT   = Math.random() * Math.PI * 2; // idle float offset
+            this.limbs    = { lLeg:null, rLeg:null, lArm:null, rArm:null, head:null };
 
             gltfLoader.load('model/scene.gltf', gltf => {
-                this.mesh = gltf.scene.clone ? gltf.scene : gltf.scene;
+                this.mesh = gltf.scene;
                 this.mesh.scale.setScalar(0.012);
                 this.mesh.position.copy(this.pos);
 
-                // Use built-in AnimationMixer if the GLTF has clips
                 if (gltf.animations && gltf.animations.length > 0) {
                     this.mixer = new THREE.AnimationMixer(this.mesh);
                     gltf.animations.forEach(clip => {
                         this.clips[clip.name.toLowerCase()] = this.mixer.clipAction(clip);
                     });
                     const idle = this.clips['idle'] || this.clips['stand'] || Object.values(this.clips)[0];
-                    if (idle) { idle.play(); }
+                    if (idle) idle.play();
                 } else {
-                    // No built-in animations — find limbs manually
                     this._findLimbs();
                 }
-
                 scene.add(this.mesh);
             }, undefined, () => this._fallback(color));
 
-            // HP bar above head
-            const bgGeo = new THREE.PlaneGeometry(1, 0.1);
+            // HP bar
+            const bgGeo = new THREE.PlaneGeometry(1.2, 0.12);
             const bgMat = new THREE.MeshBasicMaterial({ color: 0x222222, depthTest: false });
             this.hpBg = new THREE.Mesh(bgGeo, bgMat);
 
-            const fgGeo = new THREE.PlaneGeometry(1, 0.1);
+            const fgGeo = new THREE.PlaneGeometry(1.2, 0.12);
             const fgMat = new THREE.MeshBasicMaterial({ color: 0x22ee44, depthTest: false });
             this.hpFg = new THREE.Mesh(fgGeo, fgMat);
             this.hpFg.position.z = 0.01;
 
+            // Name tag
             this.hpRoot = new THREE.Group();
             this.hpRoot.add(this.hpBg, this.hpFg);
-            this.hpRoot.position.set(x, y + 2.2, z);
+            this.hpRoot.position.set(x, y + 2.4, z);
+            this.hpRoot.renderOrder = 999;
             scene.add(this.hpRoot);
         }
 
         _findLimbs() {
-            // Collect all Object3D children with children (groups = bone-like)
             const groups = [];
             this.mesh.traverse(c => { if (c.isGroup || c.isBone) groups.push(c); });
-
-            // Sort by their Y in model space
-            groups.sort((a,b) => a.position.y - b.position.y);
-
-            // Heuristic: bottom = legs, top = head/arms
+            groups.sort((a, b) => a.position.y - b.position.y);
             const n = groups.length;
             if (n >= 4) {
                 this.limbs.lLeg = groups[0];
                 this.limbs.rLeg = groups[1];
-                this.limbs.lArm = groups[n - 2];
-                this.limbs.rArm = groups[n - 1];
-                this.limbs.head = groups[n - 1];
+                this.limbs.lArm = groups[n-2];
+                this.limbs.rArm = groups[n-1];
+                this.limbs.head = groups[Math.floor(n/2)];
             } else if (n >= 2) {
                 this.limbs.lLeg = groups[0];
                 this.limbs.rLeg = groups[1];
@@ -310,15 +516,27 @@
 
         _fallback(color) {
             const g = new THREE.Group();
-            const m = c => new THREE.MeshLambertMaterial({color:c});
-            const head  = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.4,0.4), m(0xffcc88)); head.position.y = 1.7; head.name = 'head';
-            const body  = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.6,0.2), m(color));    body.position.y = 1.1;
-            const lArm  = new THREE.Group(); lArm.position.set(-0.3,1.1,0); lArm.name='lArm';
-            lArm.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.18,0.55,0.18),m(color)), {position:{x:0,y:-0.27,z:0}}));
-            const rArm  = lArm.clone(); rArm.position.x = 0.3; rArm.name='rArm';
-            const lLeg  = new THREE.Group(); lLeg.position.set(-0.12,0.6,0); lLeg.name='lLeg';
-            lLeg.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.18,0.6,0.18),m(0x223388)),{position:{x:0,y:-0.3,z:0}}));
-            const rLeg  = lLeg.clone(); rLeg.position.x = 0.12; rLeg.name='rLeg';
+            const m = c => new THREE.MeshLambertMaterial({ color: c });
+
+            const head  = new THREE.Group(); head.name = 'head';
+            head.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), m(0xffcc88)), {}));
+            head.position.y = 1.75;
+
+            const body  = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.65,0.25), m(color));
+            body.position.y = 1.1;
+
+            const lArm = new THREE.Group(); lArm.name = 'lArm'; lArm.position.set(-0.38, 1.35, 0);
+            lArm.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.22,0.6,0.22), m(color)), {position: new THREE.Vector3(0,-0.3,0)}));
+
+            const rArm = new THREE.Group(); rArm.name = 'rArm'; rArm.position.set( 0.38, 1.35, 0);
+            rArm.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.22,0.6,0.22), m(color)), {position: new THREE.Vector3(0,-0.3,0)}));
+
+            const lLeg = new THREE.Group(); lLeg.name = 'lLeg'; lLeg.position.set(-0.14, 0.75, 0);
+            lLeg.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.22,0.65,0.22), m(0x223388)), {position: new THREE.Vector3(0,-0.325,0)}));
+
+            const rLeg = new THREE.Group(); rLeg.name = 'rLeg'; rLeg.position.set( 0.14, 0.75, 0);
+            rLeg.add(Object.assign(new THREE.Mesh(new THREE.BoxGeometry(0.22,0.65,0.22), m(0x223388)), {position: new THREE.Vector3(0,-0.325,0)}));
+
             g.add(head, body, lArm, rArm, lLeg, rLeg);
             g.position.copy(this.pos);
             this.mesh = g;
@@ -333,41 +551,33 @@
             const dist     = toPlayer.length();
             const dir2d    = toPlayer.clone().setY(0).normalize();
 
-            // ── AI ──
             this.attackCd = Math.max(0, this.attackCd - dt);
+            this.floatT   += dt;
 
-            if (dist < 18) {
-                // Chase
-                this.vel.x = dir2d.x * 2.8;
-                this.vel.z = dir2d.z * 2.8;
+            if (dist < 20) {
+                this.vel.x = dir2d.x * 3;
+                this.vel.z = dir2d.z * 3;
                 this.mesh.rotation.y = Math.atan2(dir2d.x, dir2d.z);
-
-                // Attack when close
-                if (dist < 2.2 && this.attackCd <= 0) {
-                    this.doAttack();
-                }
+                if (dist < 2.2 && this.attackCd <= 0) this.doAttack();
             } else {
                 this.vel.x = 0;
                 this.vel.z = 0;
             }
 
-            // Gravity + move
             this.vel.y = Math.max(this.vel.y - 25 * dt, -40);
             this.pos.addScaledVector(this.vel, dt);
 
-            // Simple floor at y=0.5 (platform surface)
             if (this.pos.y < 0.5) { this.pos.y = 0.5; this.vel.y = 0; }
 
             this.mesh.position.copy(this.pos);
-            this.hpRoot.position.set(this.pos.x, this.pos.y + 2.2, this.pos.z);
+            this.hpRoot.position.set(this.pos.x, this.pos.y + 2.4, this.pos.z);
             this.hpRoot.lookAt(camera.position);
 
             // ── ANIMATIONS ──
             if (this.mixer) {
-                // Switch clips if built-in anim exists
-                const moving = dist < 18 && (Math.abs(this.vel.x) + Math.abs(this.vel.z)) > 0.1;
-                const clipName = this.isAtk ? 'attack' : (moving ? 'walk' : 'idle');
-                const next = this.clips[clipName] || this.clips['walk'] || this.clips[Object.keys(this.clips)[0]];
+                const moving = (Math.abs(this.vel.x) + Math.abs(this.vel.z)) > 0.1;
+                const key = this.isAtk ? 'attack' : (moving ? 'walk' : 'idle');
+                const next = this.clips[key] || Object.values(this.clips)[0];
                 if (next && !next.isRunning()) {
                     Object.values(this.clips).forEach(c => c.stop());
                     next.play();
@@ -377,7 +587,6 @@
                 this._animateManual(dt);
             }
 
-            // Attack timing
             if (this.isAtk) {
                 this.atkT += dt * 10;
                 if (this.atkT > Math.PI) { this.isAtk = false; this.atkT = 0; }
@@ -386,23 +595,37 @@
 
         _animateManual(dt) {
             const moving = (Math.abs(this.vel.x) + Math.abs(this.vel.z)) > 0.1;
-            const { lLeg, rLeg, lArm, rArm } = this.limbs;
+            const { lLeg, rLeg, lArm, rArm, head } = this.limbs;
 
             if (moving) {
                 this.walkT += dt * 9;
                 const s = Math.sin(this.walkT);
-                if (lLeg) lLeg.rotation.x = s * 0.65;
-                if (rLeg) rLeg.rotation.x = -s * 0.65;
-                if (lArm) lArm.rotation.x = -s * 0.45;
-                if (rArm) rArm.rotation.x =  s * 0.45;
+                if (lLeg) lLeg.rotation.x =  s * 0.7;
+                if (rLeg) rLeg.rotation.x = -s * 0.7;
+                if (lArm) lArm.rotation.x = -s * 0.5;
+                if (rArm) rArm.rotation.x =  s * 0.5;
+                // Body bob
+                if (this.mesh) this.mesh.position.y = this.pos.y + Math.abs(Math.sin(this.walkT * 2)) * 0.04;
             } else {
-                // Return to rest
-                [lLeg, rLeg, lArm, rArm].forEach(l => { if (l) l.rotation.x *= 0.85; });
+                // Smooth return + idle sway
+                [lLeg, rLeg, lArm, rArm].forEach(l => { if (l) l.rotation.x *= 0.88; });
+                const sway = Math.sin(this.floatT * 1.2) * 0.04;
+                if (lArm) lArm.rotation.z =  0.1 + sway;
+                if (rArm) rArm.rotation.z = -0.1 - sway;
             }
 
-            // Attack swing — right arm slams forward
-            if (this.isAtk && rArm) {
-                rArm.rotation.x = -Math.sin(this.atkT) * 1.6;
+            // Head look toward player
+            if (head) {
+                const toP = new THREE.Vector3().subVectors(player.pos, this.pos);
+                const wantYaw = Math.atan2(toP.x, toP.z) - this.mesh.rotation.y;
+                head.rotation.y = Math.max(-0.8, Math.min(0.8, wantYaw));
+                head.rotation.x = Math.max(-0.4, Math.min(0.4, -Math.atan2(toP.y - 1.6, toP.length())));
+            }
+
+            // Attack swing override
+            if (this.isAtk) {
+                if (rArm) rArm.rotation.x = -Math.sin(this.atkT) * 1.8;
+                if (lArm) lArm.rotation.x =  Math.sin(this.atkT) * 0.4;
             }
         }
 
@@ -413,23 +636,36 @@
 
             playerHP = Math.max(0, playerHP - 4);
             updateHUD();
+            flashDamage();
+            camShake = 0.2;
 
             if (playerHP <= 0) {
                 playerHP = PLAYER_HP_MAX;
                 player.pos.set(0, 3, 30);
                 player.vel.set(0,0,0);
                 updateHUD();
-                showMsg('You were eliminated! Respawning…', '#ff4444');
+                showMsg('☠ Eliminated! Respawning…', '#ff4444', '#ff4444');
             } else {
-                showMsg('Ouch! -4 HP', '#ff6666');
+                showMsg('💢 Ouch! −4 HP', '#ff8888', '#ff4444');
             }
         }
 
         takeDamage(amt) {
+            if (this.dead) return;
             this.hp -= amt;
+            // Flash red
+            this.mesh && this.mesh.traverse(c => {
+                if (c.isMesh) {
+                    const orig = c._origColor !== undefined ? c._origColor : (c._origColor = c.material.color.getHex());
+                    c.material = c.material.clone();
+                    c.material.color.setHex(0xff2222);
+                    setTimeout(() => { c.material.color.setHex(orig); }, 120);
+                }
+            });
+
             const ratio = Math.max(0, this.hp / this.maxHp);
             this.hpFg.scale.x = ratio;
-            this.hpFg.position.x = -(1 - ratio) * 0.5;
+            this.hpFg.position.x = -(1 - ratio) * 0.6;
             this.hpFg.material.color.setHex(ratio > 0.5 ? 0x22ee44 : ratio > 0.25 ? 0xffaa00 : 0xff2222);
 
             if (this.hp <= 0) this.die();
@@ -437,17 +673,30 @@
 
         die() {
             this.dead = true;
-            if (this.mesh)    scene.remove(this.mesh);
-            if (this.hpRoot)  scene.remove(this.hpRoot);
+            spawnParticles(this.pos.clone().add(new THREE.Vector3(0,1,0)), this.color, 16);
+            if (this.mesh)   scene.remove(this.mesh);
+            if (this.hpRoot) scene.remove(this.hpRoot);
             const i = npcs.indexOf(this);
             if (i > -1) npcs.splice(i, 1);
-            showMsg('Enemy eliminated!', '#44ff88');
+            showMsg(`💀 ${this.team} enemy eliminated!`, '#44ff88', '#44ff88');
+
+            // Respawn after 8s
+            setTimeout(() => {
+                if (!npcs.find(n => n.team === this.team)) {
+                    const t = TEAMS.find(t => t.name === this.team);
+                    if (t) {
+                        const npc = new NPC(t.x, 1.5, t.z, t.color, t.name);
+                        npcs.push(npc);
+                        showMsg(`⚠ ${this.team} enemy respawned!`, '#ff8844', '#ff8844');
+                    }
+                }
+            }, 8000);
         }
     }
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     //  MAP
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     const TEAMS = [
         { name:'Red',    color:0xcc2222, x:  0, z: 30 },
         { name:'Blue',   color:0x2244cc, x:  0, z:-30 },
@@ -465,25 +714,16 @@
     function buildIsland(cx, cz, color) {
         const woolMat  = txMat('white_wool', color);
         const stoneMat = txMat('stone');
-
-        for (let dx = -3; dx <= 3; dx++) {
+        for (let dx = -3; dx <= 3; dx++)
             for (let dz = -3; dz <= 3; dz++) {
                 placeBlock(cx+dx,  0, cz+dz, woolMat);
                 placeBlock(cx+dx, -1, cz+dz, stoneMat);
             }
-        }
-
         // Bed
         const bedMat = new THREE.MeshLambertMaterial({ color });
         const b1 = new THREE.Mesh(new THREE.BoxGeometry(1,0.4,1), bedMat);
         b1.position.set(cx-1, 0.7, cz); scene.add(b1);
         const b2 = b1.clone(); b2.position.x = cx+1; scene.add(b2);
-
-        // NPC enemy on each enemy island
-        if (color !== TEAMS[0].color) {
-            const npc = new NPC(cx, 1, cz, color);
-            npcs.push(npc);
-        }
     }
 
     function buildBridge(x1, z1, x2, z2) {
@@ -501,7 +741,6 @@
 
     function buildMap() {
         TEAMS.forEach(t => buildIsland(t.x, t.z, t.color));
-
         TEAMS.forEach(t => {
             const dx = -t.x, dz = -t.z;
             const len = Math.hypot(dx, dz);
@@ -511,17 +750,106 @@
             const ez = Math.round(0  - dz/len * 4);
             buildBridge(sx, sz, ex, ez);
         });
-
-        // Centre island
         const cMat = txMat('end_stone');
         for (let dx = -3; dx <= 3; dx++)
             for (let dz = -3; dz <= 3; dz++)
                 placeBlock(dx, 0, dz, cMat);
     }
 
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
+    //  VIEWMODEL (Hand + Sword)
+    // ══════════════════════════════════════════════════
+    function buildViewmodel() {
+        viewScene  = new THREE.Scene();
+        viewCamera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 20);
+        viewScene.add(new THREE.AmbientLight(0xffffff, 1.6));
+        const vSun = new THREE.DirectionalLight(0xffffff, 1.0);
+        vSun.position.set(1, 2, 1);
+        viewScene.add(vSun);
+
+        handGroup = new THREE.Group();
+        viewScene.add(handGroup);
+
+        // ── shoulder pivot ──
+        const shoulder = new THREE.Group();
+        shoulder.position.set(0.38, -0.30, -0.5);
+        shoulder.rotation.set(0.1, -0.05, 0.05);
+        handGroup.add(shoulder);
+        handGroup._shoulder = shoulder;
+
+        // Upper arm
+        const sleeve = new THREE.Mesh(
+            new THREE.BoxGeometry(0.24, 0.52, 0.24),
+            new THREE.MeshLambertMaterial({ color: 0xcc2222 })
+        );
+        sleeve.position.y = -0.26;
+        shoulder.add(sleeve);
+
+        // ── elbow pivot ──
+        const elbow = new THREE.Group();
+        elbow.position.y = -0.52;
+        shoulder.add(elbow);
+        handGroup._elbow = elbow;
+
+        // Forearm
+        const forearm = new THREE.Mesh(
+            new THREE.BoxGeometry(0.22, 0.46, 0.22),
+            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
+        );
+        forearm.position.y = -0.23;
+        elbow.add(forearm);
+
+        // Hand knuckles
+        const hand = new THREE.Mesh(
+            new THREE.BoxGeometry(0.20, 0.18, 0.20),
+            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
+        );
+        hand.position.y = -0.5;
+        elbow.add(hand);
+
+        // ── SWORD ──
+        const swordGroup = new THREE.Group();
+        swordGroup.position.set(0.02, -0.52, 0.04);
+        swordGroup.rotation.set(-0.1, 0.15, 0.05);
+        elbow.add(swordGroup);
+        handGroup._sword = swordGroup;
+
+        // Guard
+        const guard = new THREE.Mesh(
+            new THREE.BoxGeometry(0.26, 0.06, 0.06),
+            new THREE.MeshLambertMaterial({ color: 0x888888 })
+        );
+        guard.position.y = 0.04;
+        swordGroup.add(guard);
+
+        // Blade — 4 segments for a slim tapered look
+        const bladeSegs = [
+            { y: 0.18, h: 0.28, s: 0.095 },
+            { y: 0.44, h: 0.28, s: 0.080 },
+            { y: 0.68, h: 0.28, s: 0.060 },
+            { y: 0.90, h: 0.18, s: 0.035 },
+        ];
+        bladeSegs.forEach(seg => {
+            const b = new THREE.Mesh(
+                new THREE.BoxGeometry(seg.s, seg.h, seg.s),
+                new THREE.MeshLambertMaterial({ color: 0xdddddd })
+            );
+            b.position.y = seg.y;
+            swordGroup.add(b);
+        });
+
+        // Grip
+        const grip = new THREE.Mesh(
+            new THREE.BoxGeometry(0.09, 0.24, 0.09),
+            new THREE.MeshLambertMaterial({ color: 0x663300 })
+        );
+        grip.position.y = -0.14;
+        swordGroup.add(grip);
+    }
+
+    // ══════════════════════════════════════════════════
     //  INIT
-    // ═══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
     let player;
 
     function init() {
@@ -535,60 +863,25 @@
         renderer.setSize(innerWidth, innerHeight);
         renderer.setPixelRatio(devicePixelRatio);
         document.body.appendChild(renderer.domElement);
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.top = '0';
 
         // Lighting
-        const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(10,20,10);
-        const fill= new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-10,5,-10);
+        const sun  = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(10,20,10);
+        const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-10,5,-10);
         scene.add(sun, fill, new THREE.AmbientLight(0xffffff, 0.7));
 
-        // ── Viewmodel ──
-        viewScene  = new THREE.Scene();
-        viewCamera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 10);
-        viewScene.add(new THREE.AmbientLight(0xffffff, 1.4));
-        const vSun = new THREE.DirectionalLight(0xffffff, 0.8); vSun.position.set(1,2,1);
-        viewScene.add(vSun);
-
-        handGroup = new THREE.Group();
-        viewScene.add(handGroup);
-
-        // Upper arm sleeve
-        const sleeve = new THREE.Mesh(
-            new THREE.BoxGeometry(0.22, 0.55, 0.22),
-            new THREE.MeshLambertMaterial({ color: 0xcc2222 })
-        );
-        sleeve.position.y = -0.27;
-
-        // Forearm (skin)
-        handArm = new THREE.Mesh(
-            new THREE.BoxGeometry(0.20, 0.48, 0.20),
-            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
-        );
-        handArm.position.y = -0.24;
-
-        // Elbow pivot
-        const elbowPivot = new THREE.Group();
-        elbowPivot.position.y = -0.55;
-        elbowPivot.add(handArm);
-
-        // Hand
-        const handMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.18, 0.16, 0.18),
-            new THREE.MeshLambertMaterial({ color: 0xffcc88 })
-        );
-        handMesh.position.y = -0.52;
-        elbowPivot.add(handMesh);
-
-        const shoulderPivot = new THREE.Group();
-        shoulderPivot.add(sleeve, elbowPivot);
-        shoulderPivot.position.set(0.42, -0.38, -0.55);
-        shoulderPivot.rotation.set(0.15, 0.1, 0);
-        handGroup.add(shoulderPivot);
-        handGroup._shoulder = shoulderPivot;
-        handGroup._elbow    = elbowPivot;
-
-        // Map + player
+        buildViewmodel();
         buildMap();
+
         player = new Player();
+
+        TEAMS.forEach((t, i) => {
+            if (i === 0) return; // skip player team
+            const npc = new NPC(t.x, 1.5, t.z, t.color, t.name);
+            npcs.push(npc);
+        });
+
         updateHUD();
 
         // ── Input ──
@@ -598,61 +891,93 @@
                 player.vel.y = 8.5;
                 player.onGround = false;
             }
+            if (e.code === 'Escape') {
+                if (settingsOpen) closeSettings();
+                else openSettings();
+            }
+            // Hotbar
+            if (e.code === 'Digit1') selectSlot(0);
+            if (e.code === 'Digit2') selectSlot(1);
+            if (e.code === 'Digit3') selectSlot(2);
         });
-        window.addEventListener('keyup',   e => keys[e.code] = false);
-        window.addEventListener('resize',  () => {
-            camera.aspect = viewCamera.aspect = innerWidth/innerHeight;
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('resize', () => {
+            camera.aspect = viewCamera.aspect = innerWidth / innerHeight;
             camera.updateProjectionMatrix();
             viewCamera.updateProjectionMatrix();
             renderer.setSize(innerWidth, innerHeight);
         });
         document.addEventListener('mousemove', e => {
-            if (!document.pointerLockElement) return;
-            yaw   -= e.movementX * 0.002;
-            pitch  = Math.max(-1.48, Math.min(1.48, pitch - e.movementY * 0.002));
+            if (!document.pointerLockElement || settingsOpen) return;
+            yaw   -= e.movementX * Settings.sens;
+            pitch  = Math.max(-1.48, Math.min(1.48, pitch - e.movementY * Settings.sens));
             camera.rotation.set(pitch, yaw, 0, 'YXZ');
         });
         document.addEventListener('click', () => {
+            if (settingsOpen) return;
             if (!document.pointerLockElement) { document.body.requestPointerLock(); return; }
             player.tryAttack();
         });
+        document.addEventListener('contextmenu', e => e.preventDefault());
 
         animate();
     }
 
-    // ═══════════════════════════════════════════════
-    //  LOOP
-    // ═══════════════════════════════════════════════
+    function selectSlot(i) {
+        selectedSlot = i;
+        document.querySelectorAll('.slot').forEach((s,j) => s.classList.toggle('active', j===i));
+        showItemName(ITEMS[i]);
+        // Swap sword visibility
+        if (handGroup._sword) handGroup._sword.visible = (i === 0);
+    }
+
+    // ══════════════════════════════════════════════════
+    //  GAME LOOP
+    // ══════════════════════════════════════════════════
     function animate() {
         requestAnimationFrame(animate);
         const dt = Math.min(clock.getDelta(), 0.05);
 
         player.update(dt);
         npcs.forEach(n => n.update(dt));
+        updateParticles(dt);
 
-        // ── Hand animation ──
+        // ── Hand / Viewmodel animation ──
         handT += dt;
         const moving = (Math.abs(player.vel.x) + Math.abs(player.vel.z)) > 0.3;
 
-        // Walk bob
-        const bobFreq = moving ? 8 : 1.5;
-        const bobAmp  = moving ? 0.022 : 0.005;
+        const bobFreq = moving ? 8.5 : 1.5;
+        const bobAmp  = moving ? 0.025 : 0.006;
         const bobY    = Math.sin(handT * bobFreq) * bobAmp;
-        const bobX    = Math.sin(handT * bobFreq * 0.5) * bobAmp * 0.5;
+        const bobX    = Math.sin(handT * bobFreq * 0.5) * bobAmp * 0.6;
+        const sideSwayY = Math.sin(handT * 0.8) * 0.003; // breathing
+        const sideSwayX = Math.cos(handT * 0.6) * 0.002;
 
-        // Attack swing: shoulder slams forward, elbow follows
+        // Attack swing: shoulder fwd + down, elbow snaps
         if (handSwing > 0) handSwing = Math.max(0, handSwing - dt * 8);
-        const swingPhase = handSwing > 0 ? Math.sin(handSwing * Math.PI) : 0;
+        const swingT = handSwing > 0 ? Math.sin(handSwing * Math.PI) : 0;
 
         const shoulder = handGroup._shoulder;
         const elbow    = handGroup._elbow;
+        const sword    = handGroup._sword;
+
         if (shoulder) {
-            shoulder.position.set(0.42 + bobX, -0.38 - bobY, -0.55);
-            shoulder.rotation.x = 0.15 - swingPhase * 1.2;
-            shoulder.rotation.z = bobX * 0.4;
+            shoulder.position.set(
+                0.38 + bobX + sideSwayX,
+                -0.30 - bobY + sideSwayY,
+                -0.5
+            );
+            shoulder.rotation.x = 0.1 - swingT * 1.4;
+            shoulder.rotation.y = -0.05 - swingT * 0.3;
+            shoulder.rotation.z = 0.05 + bobX * 0.5;
         }
         if (elbow) {
-            elbow.rotation.x = -0.1 + swingPhase * 0.7;
+            elbow.rotation.x = -0.08 + swingT * 0.8;
+        }
+        if (sword) {
+            // Slight sword tilt while walking
+            sword.rotation.z = bobX * 0.6;
+            sword.rotation.x = -0.1 - swingT * 0.5;
         }
 
         // ── Render ──
